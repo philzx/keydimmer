@@ -23,6 +23,8 @@ final class AppModel {
     /// Nil when the built-in display can't be driven.
     var displayLadder: Ladder? { controller?.displayLadder }
     var displayLevel: Level? { previewDisplayLevel ?? controller?.displayLevel }
+    /// Why shades can't be selected (another gamma app is running), or nil.
+    var shadesUnavailableReason: String? { controller?.shadesUnavailableReason }
     var displayLevelIndex: Int { displayLevel.flatMap { displayLadder?.index(of: $0) } ?? 0 }
 
     var ladder: Ladder { controller?.ladder ?? Ladder(floorPWM: 54) }
@@ -95,6 +97,7 @@ final class AppModel {
     private let hardware: BacklightHardware?
     private let hotKeys = HotKeys()
     private var power: PowerObserver?
+    private var apps: AppLaunchObserver?
 
     init() {
         let defaults = UserDefaults.standard
@@ -167,6 +170,13 @@ final class AppModel {
             switch event {
             case .willSleep: controller?.willSleep()
             case .didWake: controller?.didWake()
+            }
+        }
+        // Before starting, so a saved shade isn't re-applied over another gamma app.
+        apps = AppLaunchObserver { [weak controller] event in
+            switch event {
+            case let .launched(id): controller?.otherGammaAppLaunched(bundleIdentifier: id)
+            case let .quit(id): controller?.otherGammaAppQuit(bundleIdentifier: id)
             }
         }
         controller.start()
