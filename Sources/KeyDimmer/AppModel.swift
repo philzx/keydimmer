@@ -42,7 +42,7 @@ final class AppModel {
         didSet {
             defaults.set(hotkeysEnabled, forKey: Keys.hotkeys)
             hotKeys.isEnabled = hotkeysEnabled
-            hotkeysUnavailable = hotKeys.registrationFailed
+            unavailableShortcuts = hotKeys.failedLights
         }
     }
 
@@ -50,12 +50,12 @@ final class AppModel {
         didSet {
             defaults.set(hotkeyModifiers.rawValue, forKey: Keys.hotkeyModifiers)
             hotKeys.modifiers = hotkeyModifiers
-            hotkeysUnavailable = hotKeys.registrationFailed
+            unavailableShortcuts = hotKeys.failedLights
         }
     }
 
-    /// The shortcuts are on but macOS wouldn't register them (another app has the same keys).
-    private(set) var hotkeysUnavailable = false
+    /// The lights whose shortcuts are on but macOS wouldn't register (another app has the same keys).
+    private(set) var unavailableShortcuts: Set<Light> = []
 
     var followsInactivity: Bool {
         get { controller?.followsInactivity ?? true }
@@ -177,12 +177,16 @@ final class AppModel {
         hardware?.observeBrightness { [weak controller] value in
             DispatchQueue.main.async { controller?.brightnessChanged(to: value) }
         }
-        // The controller ignores commands for lights this Mac doesn't have (`controller.lights`),
-        // so shortcuts for an absent light do nothing.
-        hotKeys.onStep = { [weak self] delta in self?.step(by: delta) }
+        // Shortcuts are registered and routed only for the lights this Mac has (`controller.lights`),
+        // so an absent light's keys stay free for other apps.
+        hotKeys.lights = Set(controller.lights)
+        hotKeys.onStep = { [weak controller] light, delta in
+            guard let controller, controller.has(light) else { return }
+            controller.step(light, by: delta)
+        }
         hotKeys.modifiers = hotkeyModifiers
         hotKeys.isEnabled = hotkeysEnabled
-        hotkeysUnavailable = hotKeys.registrationFailed
+        unavailableShortcuts = hotKeys.failedLights
         power = PowerObserver { [weak controller] event in
             switch event {
             case .willSleep: controller?.willSleep()
