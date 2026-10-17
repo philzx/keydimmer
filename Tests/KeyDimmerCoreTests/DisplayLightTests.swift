@@ -189,6 +189,42 @@ struct DisplayLightTests {
         #expect(rig.display.brightness() == Level.systemBrightness(step: 6))
     }
 
+    /// macOS and the panel move the brightness around while the screens sleep and wake; like Lunar,
+    /// the shade ignores that until the grace is over.
+    @Test func brightnessChangesWhileAsleepOrDuringTheWakeGraceDoNotRemoveTheShade() {
+        let rig = Rig()
+        let controller = rig.launch()
+        let shade3 = Ladder.display().shade(3)
+        controller.select(shade3!, on: .display)
+
+        controller.willSleep()
+        rig.display.externalChange(to: 0)
+        rig.run(for: 10)
+        controller.didWake()
+        rig.display.externalChange(to: 0.4)
+        rig.run(for: 2)
+
+        #expect(controller.level(of: .display) == shade3)
+        #expect(rig.display.gammaFactor == factor(shade3))
+        #expect(rig.display.brightness() == Self.floor)
+        #expect(rig.display.isAutoBrightnessEnabled == false)
+    }
+
+    @Test func aBrightnessChangeAfterTheWakeGraceStillTakesOverFromTheShade() {
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.select(Ladder.display().shade(3)!, on: .display)
+        controller.willSleep()
+        controller.didWake()
+        rig.run(for: 2)
+
+        rig.display.externalChange(to: 0.3)
+        rig.run(for: 1)
+
+        #expect(controller.level(of: .display) == .system(step: 5))
+        #expect(rig.display.gammaFactor == 1)
+    }
+
     @Test func wakingTwiceAndSleepingAgainBeforeTheGraceEndsLeavesThePictureUnshaded() {
         // Sleep, then display sleep, then their two wakes: macOS sends both.
         let rig = Rig()

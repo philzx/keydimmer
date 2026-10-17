@@ -347,9 +347,11 @@ public final class LightController {
     /// can arrive after we've moved on, so the display's brightness right now is what counts, not
     /// the reported value. On a shade, anything but the floor means someone else (the brightness
     /// keys, Control Center, another app) took over: step aside and follow them. On a system step,
-    /// the slider just follows.
+    /// the slider just follows. While the shade is off for sleep, until the wake grace is over,
+    /// macOS and the panel move the brightness themselves (as Lunar does, ignore it): the wake puts
+    /// the shade back on the floor.
     private func displayBrightnessChanged() {
-        guard let display, let displayLadder, let displayLevel else { return }
+        guard let display, let displayLadder, let displayLevel, displaySleepingShade == nil else { return }
         let brightness = display.brightness()
         trace("display brightness notification \(brightness)")
         let level = displayLadder.nearestLevel(forBrightness: brightness)
