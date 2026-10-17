@@ -6,6 +6,7 @@ struct KeyDimmerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
+        Installer.waitForReplacedInstance()
         Snapshot.runIfRequested()
     }
 
