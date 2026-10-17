@@ -10,6 +10,9 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
+    env:
+      # Fine-grained token with Contents: write on philzx/homebrew-tap; the step is skipped without it.
+      TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,3 +35,16 @@ jobs:
             --title "KeyDimmer $VERSION" \
             --generate-notes \
             --notes-file .github/release-notes.md
+
+      - name: Update Homebrew cask
+        if: env.TAP_TOKEN != ''
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA=$(awk -v f="KeyDimmer-$VERSION.zip" '$2 == f { print $1 }' dist/SHA256SUMS)
+          git clone "https://x-access-token:$TAP_TOKEN@github.com/philzx/homebrew-tap.git" tap
+          cd tap
+          sed -i '' -e "s/^  version \".*\"/  version \"$VERSION\"/" -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/keydimmer.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "keydimmer $VERSION"
+          git push

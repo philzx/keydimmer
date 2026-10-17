@@ -1,16 +1,20 @@
 import AppKit
 import Observation
 
-/// Asks GitHub once a day whether a newer release exists. The only network access KeyDimmer makes.
+/// Asks GitHub once a day whether a newer release exists, and installs it on request. The only
+/// network access KeyDimmer makes.
 @MainActor
 @Observable
 final class UpdateChecker {
     struct Release: Equatable {
         let version: String
         let page: URL
+        let zip: URL
+        let checksums: URL
     }
 
     private(set) var available: Release?
+    private(set) var isInstalling = false
 
     var isEnabled: Bool {
         didSet {
@@ -48,6 +52,42 @@ final class UpdateChecker {
         if let available { NSWorkspace.shared.open(available.page) }
     }
 
+    /// Asks first, then installs and relaunches. On failure, offers the release page instead.
+    func install() {
+        guard let release = available, !isInstalling else { return }
+        NSApp.activate()
+        let confirm = NSAlert()
+        confirm.messageText = "Install KeyDimmer \(release.version)?"
+        confirm.informativeText = Installer.isHomebrewInstall
+            ? "KeyDimmer will be upgraded with Homebrew and then restart."
+            : "KeyDimmer will download the update, replace itself and restart."
+        confirm.addButton(withTitle: "Install and Restart")
+        confirm.addButton(withTitle: "Release Notes")
+        confirm.addButton(withTitle: "Cancel")
+        switch confirm.runModal() {
+        case .alertFirstButtonReturn: break
+        case .alertSecondButtonReturn: return openReleasePage()
+        default: return
+        }
+
+        isInstalling = true
+        Task {
+            do {
+                try await Installer.install(release)
+                Installer.relaunch()
+            } catch {
+                isInstalling = false
+                NSApp.activate()
+                let failure = NSAlert()
+                failure.messageText = "The update couldn't be installed"
+                failure.informativeText = error.localizedDescription
+                failure.addButton(withTitle: "Open Release Page")
+                failure.addButton(withTitle: "Cancel")
+                if failure.runModal() == .alertFirstButtonReturn { openReleasePage() }
+            }
+        }
+    }
+
     private func checkIfDue(force: Bool = false) {
         guard isEnabled, let current else { return }
         let last = defaults.object(forKey: Keys.lastCheck) as? Date ?? .distantPast
@@ -62,8 +102,13 @@ final class UpdateChecker {
 
     private static func fetchLatest() async -> Release? {
         struct Payload: Decodable {
+            struct Asset: Decodable {
+                let name: String
+                let browser_download_url: URL
+            }
             let tag_name: String
             let html_url: URL
+            let assets: [Asset]
         }
         var request = URLRequest(url: latestRelease)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -72,7 +117,9 @@ final class UpdateChecker {
               let payload = try? JSONDecoder().decode(Payload.self, from: data)
         else { return nil }
         let version = payload.tag_name.hasPrefix("v") ? String(payload.tag_name.dropFirst()) : payload.tag_name
-        return Release(version: version, page: payload.html_url)
+        func asset(_ name: String) -> URL? { payload.assets.first { $0.name == name }?.browser_download_url }
+        guard let zip = asset("KeyDimmer-\(version).zip"), let checksums = asset("SHA256SUMS") else { return nil }
+        return Release(version: version, page: payload.html_url, zip: zip, checksums: checksums)
     }
 
     /// Numeric comparison of dotted versions ("1.10.0" > "1.9.2"); missing parts count as 0.

@@ -105,8 +105,12 @@ struct MenuContent: View {
 
     private var footer: some View {
         HStack {
-            if let release = model.updates.available {
-                Button { model.updates.openReleasePage() } label: {
+            if model.updates.isInstalling {
+                Label("Updating…", systemImage: "arrow.down.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if let release = model.updates.available {
+                Button { model.updates.install() } label: {
                     Label("Update to v\(release.version)", systemImage: "arrow.down.circle.fill")
                         .font(.caption)
                 }
