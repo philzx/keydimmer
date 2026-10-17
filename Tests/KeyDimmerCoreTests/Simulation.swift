@@ -65,6 +65,8 @@ final class SimulatedBacklight: BacklightHardware {
     var isAutoBrightnessEnabled = true
     var idleSuspended = false
     var lidClosed = false
+    /// The user's "turn keyboard backlight off after inactivity" setting; 0 means never.
+    var idleDimSeconds: TimeInterval = 0
 
     init(clock: FakeClock, floorPWM: Double = 54, slope: Double = 282, startPWM: Double = 70,
          durations: [Int32: TimeInterval] = [500_000: 41, 2_000: 2, 350: 0.36, 0: 0], latency: TimeInterval = 0) {
@@ -108,7 +110,68 @@ final class SimulatedBacklight: BacklightHardware {
 
     func setAutoBrightness(_ enabled: Bool) { isAutoBrightnessEnabled = enabled }
     func setIdleDimmingSuspended(_ suspended: Bool) { idleSuspended = suspended }
-    func idleDimTime() -> TimeInterval { 0 }
+    func idleDimTime() -> TimeInterval { idleDimSeconds }
     func isLidClosed() -> Bool { lidClosed }
     func observeBrightness(_ handler: @escaping (Float) -> Void) { brightnessHandlers.append(handler) }
+}
+
+/// Built-in display that records what it was asked to do: macOS's brightness, the gamma factor
+/// over its original table, and automatic brightness. Like the keyboard, it reports every
+/// brightness change, including ours; `externalChange(to:)` imitates the keys or Control Center.
+final class SimulatedDisplay: DisplayHardware {
+    static let original = GammaTable(
+        red: (0...255).map { Float($0) / 255 }, green: (0...255).map { Float($0) / 255 }, blue: (0...255).map { Float($0) / 255 }
+    )
+
+    private(set) var currentBrightness: Float
+    /// 1 while the original table is in effect.
+    private(set) var gammaFactor: Float = 1
+    private(set) var brightnessCommands = 0
+    private(set) var gammaCommands = 0
+    var hasAutoBrightness = true
+    var isAutoBrightnessEnabled = true
+    /// Measured luminance at the floor and at full brightness, roughly a 15" M4 MacBook Air.
+    var floorNits = 2.06
+    var maxNits = 500.0
+    private var brightnessHandlers: [(Float) -> Void] = []
+
+    init(brightness: Float = 0.5) {
+        currentBrightness = brightness
+    }
+
+    /// Changes the brightness as if the user pressed a brightness key or used Control Center.
+    func externalChange(to value: Float) {
+        currentBrightness = value
+        brightnessHandlers.forEach { $0(value) }
+    }
+
+    func brightness() -> Float { currentBrightness }
+
+    func setBrightness(_ value: Float) {
+        brightnessCommands += 1
+        currentBrightness = value
+        brightnessHandlers.forEach { $0(value) }
+    }
+
+    func setGamma(factor: Float) {
+        gammaCommands += 1
+        gammaFactor = factor
+    }
+
+    func restoreGamma() {
+        gammaCommands += 1
+        gammaFactor = 1
+    }
+
+    func readGamma() -> GammaTable? { Self.original.scaled(by: gammaFactor) }
+
+    func setAutoBrightness(_ enabled: Bool) { isAutoBrightnessEnabled = enabled }
+
+    func observeBrightness(_ handler: @escaping (Float) -> Void) { brightnessHandlers.append(handler) }
+
+    func measuredNits() -> Double? {
+        let floor = Level.systemBrightness(step: 1)
+        let above = max(Double(currentBrightness - floor) / Double(1 - floor), 0)
+        return floorNits + (maxNits - floorNits) * above
+    }
 }

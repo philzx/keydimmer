@@ -2,8 +2,8 @@ import AppKit
 import KeyDimmerCore
 import SwiftUI
 
-/// `KeyDimmer --snapshot <out.png> [level]` renders the menu panel to a PNG without touching the
-/// backlight — used for the README and for checking layout without screen-recording permission.
+/// `KeyDimmer --snapshot <out.png> [level…]` renders the menu panel to a PNG without touching the
+/// lights (e.g. `ember:4 display:shade:3`) — used for the README and for checking layout without screen-recording permission.
 @MainActor
 enum Snapshot {
     static func runIfRequested() {
@@ -11,7 +11,7 @@ enum Snapshot {
         guard let flag = arguments.firstIndex(of: "--snapshot"), arguments.count > flag + 1 else { return }
         let output = URL(fileURLWithPath: arguments[flag + 1])
         let model = AppModel()
-        if arguments.count > flag + 2 { model.preview(levelNamed: arguments[flag + 2]) }
+        for name in arguments.dropFirst(flag + 2) { model.preview(levelNamed: name) }
 
         for appearance in [NSAppearance.Name.darkAqua, .aqua] {
             let host = NSHostingView(rootView: MenuContent(model: model).background(.regularMaterial))

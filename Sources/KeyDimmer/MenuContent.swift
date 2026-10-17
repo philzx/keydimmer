@@ -3,12 +3,13 @@ import SwiftUI
 
 enum Brand {
     static let ember = Color(red: 1.0, green: 0.55, blue: 0.2)
+    static let shade = Color(red: 0.45, green: 0.5, blue: 0.95)
     static let tagline = "Below the bottom step."
 }
 
 struct MenuContent: View {
     @Bindable var model: AppModel
-    @FocusState private var sliderFocused: Bool
+    @FocusState private var focusedSlider: Light?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -17,14 +18,21 @@ struct MenuContent: View {
                 Label(reason, systemImage: "exclamationmark.triangle")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-            } else {
-                LadderSlider(ladder: model.ladder, index: model.levelIndex) { model.select(index: $0) }
-                    .focusable()
-                    .focusEffectDisabled()
-                    .focused($sliderFocused)
-                    .onKeyPress(keys: [.leftArrow, .downArrow]) { _ in model.step(by: -1); return .handled }
-                    .onKeyPress(keys: [.rightArrow, .upArrow]) { _ in model.step(by: 1); return .handled }
+            }
+            if model.hasKeyboard {
+                LadderSlider(ladder: model.ladder, index: model.levelIndex, name: "Keyboard brightness") {
+                    model.select(index: $0)
+                }
+                .focusable()
+                .focusEffectDisabled()
+                .focused($focusedSlider, equals: .keyboard)
+                .onKeyPress(keys: [.leftArrow, .downArrow]) { _ in model.step(by: -1); return .handled }
+                .onKeyPress(keys: [.rightArrow, .upArrow]) { _ in model.step(by: 1); return .handled }
                 status
+            }
+            if let ladder = model.displayLadder, let level = model.displayLevel {
+                if model.hasKeyboard { Divider() }
+                displaySection(ladder: ladder, level: level)
             }
             Divider()
             settings
@@ -34,7 +42,7 @@ struct MenuContent: View {
         .padding(16)
         .frame(width: 320)
         .onAppear {
-            sliderFocused = true
+            focusedSlider = model.hasKeyboard ? .keyboard : .display
             model.refreshLaunchAtLogin()
         }
     }
@@ -46,14 +54,44 @@ struct MenuContent: View {
                 Text(Brand.tagline).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(model.level.title)
-                    .font(.system(.title3, design: .rounded).weight(.semibold))
-                    .foregroundStyle(model.level.isEmber ? Brand.ember : .primary)
+            if model.hasKeyboard { keyboardLevel }
+        }
+    }
+
+    private var keyboardLevel: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(model.level.title)
+                .font(.system(.title3, design: .rounded).weight(.semibold))
+                .foregroundStyle(model.level.isEmber ? Brand.ember : .primary)
+                .contentTransition(.numericText())
+            if let duty = model.dutyDescription {
+                Text("duty \(duty)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func displaySection(ladder: Ladder, level: Level) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Display").font(.subheadline.weight(.medium))
+                Spacer()
+                Text(level.title)
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                    .foregroundStyle(level.isShade ? Brand.shade : .primary)
                     .contentTransition(.numericText())
-                if let duty = model.dutyDescription {
-                    Text("duty \(duty)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }
+            }
+            LadderSlider(ladder: ladder, index: model.displayLevelIndex, name: "Display brightness") {
+                model.selectDisplay(index: $0)
+            }
+            .focusable()
+            .focusEffectDisabled()
+            .focused($focusedSlider, equals: .display)
+            .onKeyPress(keys: [.leftArrow, .downArrow]) { _ in model.stepDisplay(by: -1); return .handled }
+            .onKeyPress(keys: [.rightArrow, .upArrow]) { _ in model.stepDisplay(by: 1); return .handled }
+            if let reason = model.shadesUnavailableReason {
+                Label(reason, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -90,7 +128,7 @@ struct MenuContent: View {
             HStack {
                 Text("Global shortcuts")
                 Picker("Shortcut modifiers", selection: $model.hotkeyModifiers) {
-                    ForEach(HotKeys.Modifiers.allCases) { Text("\($0.symbols)↑ \($0.symbols)↓").tag($0) }
+                    ForEach(HotKeys.Modifiers.allCases) { Text(shortcutsTitle($0)).tag($0) }
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
@@ -100,11 +138,14 @@ struct MenuContent: View {
                 Spacer()
                 switchToggle("Global shortcuts", isOn: $model.hotkeysEnabled)
             }
-            if model.hotkeysEnabled, model.hotkeysUnavailable {
-                notice("\(model.hotkeyModifiers.symbols)↑/↓ are taken by another app. Choose other keys.")
+            if model.hotkeysEnabled, let taken = takenShortcuts {
+                notice("\(taken) taken by another app. Choose other keys.")
             }
-            settingRow("Turn off with macOS inactivity timer", isOn: $model.followsInactivity)
-            if model.isSupported {
+            if model.hasKeyboard, model.hasDisplay {
+                settingRow("Keyboard follows display", isOn: $model.isLinked)
+            }
+            if model.hasKeyboard {
+                settingRow("Turn off with macOS inactivity timer", isOn: $model.followsInactivity)
                 HStack {
                     Text("macOS floor")
                     Text(model.calibrationFailed ? "measuring failed" : model.floorDescription ?? "not measured")
@@ -137,12 +178,43 @@ struct MenuContent: View {
         }
     }
 
+    /// The shortcuts macOS refused, e.g. "⌃⌥↑/↓ are" or "⌃⌥↑/↓ and ⌃⌥⇧↑/↓ are".
+    private var takenShortcuts: String? {
+        let symbols = model.hotkeyModifiers.symbols
+        let keys = [Light.keyboard, .display].filter(model.unavailableShortcuts.contains).map {
+            "\(symbols)\(Self.shift(for: $0))↑/↓"
+        }
+        return keys.isEmpty ? nil : keys.joined(separator: " and ") + " are"
+    }
+
     private var updateCheckDescription: String? {
         if model.updates.isChecking { return "checking…" }
         switch model.updates.checkResult {
         case .upToDate?: return "up to date"
         case .failed?: return "check failed"
         case nil: return nil
+        }
+    }
+
+    /// "⇧" if the light's shortcuts add ⇧ to the configured modifiers (`Shortcut.all`), else "".
+    private static func shift(for light: Light) -> String {
+        Shortcut.all.contains { $0.light == light && $0.addsShift } ? "⇧" : ""
+    }
+
+    /// The keyboard's arrows, plus a reminder of the display's ⇧; only for the lights this Mac has.
+    private func shortcutsTitle(_ modifiers: HotKeys.Modifiers) -> String {
+        let symbols = modifiers.symbols
+        func arrows(_ light: Light) -> String {
+            let shift = Self.shift(for: light)
+            return "\(symbols)\(shift)↑ \(symbols)\(shift)↓"
+        }
+        switch (model.hasKeyboard, model.hasDisplay) {
+        case (true, true):
+            let displayShift = Self.shift(for: .display)
+            return displayShift == Self.shift(for: .keyboard)
+                ? arrows(.keyboard) : "\(arrows(.keyboard)) (+\(displayShift) display)"
+        case (false, true): return arrows(.display)
+        default: return arrows(.keyboard)
         }
     }
 
@@ -201,10 +273,12 @@ struct MenuContent: View {
     }
 }
 
-/// One continuous control over Off, the embers and the macOS steps, with the macOS floor marked.
+/// One continuous control over a light's ladder (Off and the embers, or the shades, then the
+/// macOS steps), with the macOS floor marked.
 struct LadderSlider: View {
     let ladder: Ladder
     let index: Int
+    let name: String
     let onChange: (Int) -> Void
 
     private let thumb: CGFloat = 18
@@ -239,10 +313,11 @@ struct LadderSlider: View {
 
             GeometryReader { proxy in
                 let fraction = CGFloat(firstSystemIndex) / CGFloat(max(ladder.count - 1, 1))
+                let offWidth: CGFloat = hasOff ? 30 : 0
                 HStack(spacing: 0) {
-                    Text("Off").frame(width: 30, alignment: .leading)
-                    Text("Embers").foregroundStyle(Brand.ember)
-                        .frame(width: max(proxy.size.width * fraction - 30, 0), alignment: .center)
+                    if hasOff { Text("Off").frame(width: offWidth, alignment: .leading) }
+                    Text(belowFloorName).foregroundStyle(belowFloorColor)
+                        .frame(width: max(proxy.size.width * fraction - offWidth, 0), alignment: .center)
                     Text("macOS").frame(maxWidth: .infinity, alignment: .center)
                 }
                 .font(.caption2.weight(.medium))
@@ -251,7 +326,7 @@ struct LadderSlider: View {
             .frame(height: 12)
         }
         .accessibilityElement()
-        .accessibilityLabel("Keyboard brightness")
+        .accessibilityLabel(name)
         .accessibilityValue(ladder.level(at: index).title)
         .accessibilityAdjustableAction { direction in
             onChange(min(max(index + (direction == .increment ? 1 : -1), 0), ladder.count - 1))
@@ -262,8 +337,19 @@ struct LadderSlider: View {
         ladder.levels.firstIndex { if case .system = $0 { return true } else { return false } } ?? ladder.count
     }
 
+    private var hasOff: Bool { ladder.levels.first == .off }
+
+    private var hasShades: Bool { ladder.levels.contains(where: \.isShade) }
+
+    private var belowFloorName: String { hasShades ? "Shades" : "Embers" }
+
+    private var belowFloorColor: Color { hasShades ? Brand.shade : Brand.ember }
+
     private var thumbColor: Color {
-        ladder.level(at: index).isEmber ? Brand.ember : .accentColor
+        let level = ladder.level(at: index)
+        if level.isEmber { return Brand.ember }
+        if level.isShade { return Brand.shade }
+        return .accentColor
     }
 
     private func track(step: CGFloat) -> some View {
@@ -283,9 +369,11 @@ struct LadderSlider: View {
         case .off:
             return .clear
         case let .ember(i, _):
-            let embers = ladder.levels.filter(\.isEmber).count
-            let t = Double(i) / Double(max(embers, 1))
+            let t = Double(i) / Double(max(ladder.emberCount, 1))
             return active ? Brand.ember.opacity(0.35 + 0.65 * t) : Brand.ember.opacity(0.12 + 0.1 * t)
+        case let .shade(i, _):
+            let t = Double(i) / Double(max(ladder.shadeCount, 1))
+            return active ? Brand.shade.opacity(0.35 + 0.65 * t) : Brand.shade.opacity(0.12 + 0.1 * t)
         case let .system(step):
             let t = Double(step) / Double(Ladder.systemSteps)
             return active ? Color.accentColor.opacity(0.45 + 0.55 * t) : Color.secondary.opacity(0.18)

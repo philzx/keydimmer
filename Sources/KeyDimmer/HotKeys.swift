@@ -1,8 +1,10 @@
 import AppKit
 import Carbon.HIToolbox
+import KeyDimmerCore
 
-/// System-wide modifier + ↓ / ↑ to step the slider, repeating while held like any other key.
-/// Carbon hot keys need no Accessibility permission.
+/// System-wide modifier + ↓ / ↑ to step the keyboard's slider, and modifier + ⇧ + ↓ / ↑ for the
+/// built-in display's, repeating while held like any other key. Carbon hot keys need no
+/// Accessibility permission.
 @MainActor
 final class HotKeys {
     /// The modifier pairs on offer; the arrows themselves are fixed.
@@ -42,7 +44,16 @@ final class HotKeys {
         }
     }
 
-    var onStep: ((Int) -> Void)?
+    var onStep: ((Light, Int) -> Void)?
+
+    /// The lights to register shortcuts for: a Mac without a display light leaves its keys free.
+    var lights: Set<Light> = [.keyboard] {
+        didSet {
+            guard lights != oldValue, isEnabled else { return }
+            unregister()
+            register()
+        }
+    }
 
     var isEnabled = false {
         didSet {
@@ -59,17 +70,13 @@ final class HotKeys {
         }
     }
 
-    /// True when macOS refused one of the shortcuts, usually because another app holds it. Both are
-    /// then left unregistered rather than half working.
-    private(set) var registrationFailed = false
+    /// The lights whose shortcuts macOS refused, usually because another app holds them. A light's
+    /// ↑ and ↓ are then both left unregistered rather than half working; the other light's still work.
+    private(set) var failedLights: Set<Light> = []
 
     private static let signature: OSType = 0x4B44_4D52 // 'KDMR'
-    private static let bindings: [(id: UInt32, keyCode: Int, delta: Int)] = [
-        (1, kVK_DownArrow, -1),
-        (2, kVK_UpArrow, +1),
-    ]
 
-    private var refs: [EventHotKeyRef] = []
+    private var refs: [Light: [EventHotKeyRef]] = [:]
     private var handler: EventHandlerRef?
     /// Carbon reports a press once, never as repeats, so holding the keys is timed here.
     private var repeatTimer: Timer?
@@ -86,35 +93,37 @@ final class HotKeys {
                               nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
             let hotKeys = Unmanaged<HotKeys>.fromOpaque(context).takeUnretainedValue()
             guard id.signature == HotKeys.signature,
-                  let binding = HotKeys.bindings.first(where: { $0.id == id.id }) else { return OSStatus(eventNotHandledErr) }
+                  let shortcut = Shortcut.all.first(where: { $0.id == id.id }) else { return OSStatus(eventNotHandledErr) }
             let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
-            MainActor.assumeIsolated { pressed ? hotKeys.pressed(binding.delta) : hotKeys.stopRepeating() }
+            MainActor.assumeIsolated { pressed ? hotKeys.pressed(shortcut) : hotKeys.stopRepeating() }
             return noErr
         }, specs.count, &specs, context, &handler)
 
-        var failed = false
-        for binding in Self.bindings {
+        var failed: Set<Light> = []
+        for shortcut in Shortcut.all where lights.contains(shortcut.light) {
             var ref: EventHotKeyRef?
-            let id = EventHotKeyID(signature: Self.signature, id: binding.id)
-            let status = RegisterEventHotKey(UInt32(binding.keyCode), UInt32(modifiers.carbon), id,
-                                             GetApplicationEventTarget(), 0, &ref)
-            if status == noErr, let ref { refs.append(ref) } else { failed = true }
+            let id = EventHotKeyID(signature: Self.signature, id: shortcut.id)
+            let keyCode = shortcut.arrow == .up ? kVK_UpArrow : kVK_DownArrow
+            let carbon = modifiers.carbon | (shortcut.addsShift ? shiftKey : 0)
+            let status = RegisterEventHotKey(UInt32(keyCode), UInt32(carbon), id, GetApplicationEventTarget(), 0, &ref)
+            if status == noErr, let ref { refs[shortcut.light, default: []].append(ref) } else { failed.insert(shortcut.light) }
         }
-        if failed { unregister() }
-        registrationFailed = failed
+        failed.forEach(unregister)
+        failedLights = failed
     }
 
     /// Steps once, then again after the system's key repeat delay and at its repeat rate until released.
-    private func pressed(_ delta: Int) {
-        onStep?(delta)
-        schedule(after: NSEvent.keyRepeatDelay) { [weak self] in self?.repeatStep(delta) }
+    private func pressed(_ shortcut: Shortcut) {
+        onStep?(shortcut.light, shortcut.delta)
+        schedule(after: NSEvent.keyRepeatDelay) { [weak self] in self?.repeatStep(shortcut) }
     }
 
-    private func repeatStep(_ delta: Int) {
+    private func repeatStep(_ shortcut: Shortcut) {
         // A release isn't always reported when the modifiers come up before the arrow.
-        guard NSEvent.modifierFlags.contains(modifiers.flags) else { return stopRepeating() }
-        onStep?(delta)
-        schedule(after: NSEvent.keyRepeatInterval) { [weak self] in self?.repeatStep(delta) }
+        let flags = shortcut.addsShift ? modifiers.flags.union(.shift) : modifiers.flags
+        guard NSEvent.modifierFlags.contains(flags) else { return stopRepeating() }
+        onStep?(shortcut.light, shortcut.delta)
+        schedule(after: NSEvent.keyRepeatInterval) { [weak self] in self?.repeatStep(shortcut) }
     }
 
     private func schedule(after interval: TimeInterval, _ action: @escaping @MainActor () -> Void) {
@@ -132,10 +141,14 @@ final class HotKeys {
 
     private func unregister() {
         stopRepeating()
-        refs.forEach { UnregisterEventHotKey($0) }
-        refs.removeAll()
+        refs.keys.forEach(unregister)
         if let handler { RemoveEventHandler(handler) }
         handler = nil
-        registrationFailed = false
+        failedLights = []
+    }
+
+    private func unregister(_ light: Light) {
+        refs[light]?.forEach { UnregisterEventHotKey($0) }
+        refs[light] = nil
     }
 }

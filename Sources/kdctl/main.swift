@@ -7,6 +7,7 @@ import KeyDimmerCore
 //   kdctl floor             measure this Mac's floor PWM
 //   kdctl hold <pwm> [sec]  hold a sub-minimum PWM and report how steady it stayed
 //   kdctl set <0...1>       set a macOS brightness (committed)
+//   kdctl display ...       built-in display diagnostics (see Display.swift)
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -14,6 +15,8 @@ func fail(_ message: String) -> Never {
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
+// The display commands don't need the keyboard backlight, so they run before it is opened.
+if arguments.first == "display" { runDisplay(Array(arguments.dropFirst())) }
 let hardware: CoreBrightnessBacklight
 do {
     hardware = try CoreBrightnessBacklight()
@@ -114,5 +117,5 @@ case "set":
     guard arguments.count >= 2, let value = Float(arguments[1]) else { fail("usage: kdctl set <0...1>") }
     hardware.setBrightness(value, fadeSpeed: 350, commit: true)
 default:
-    fail("usage: kdctl info | floor | hold <pwm> [seconds] | set <0...1>")
+    fail("usage: kdctl info | floor | hold <pwm> [seconds] | set <0...1> | display [info | shade <factor> [seconds]]")
 }
