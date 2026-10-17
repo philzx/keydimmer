@@ -1,0 +1,3 @@
+# One app for the keyboard and the displays
+
+Display control (built-in and external monitors) is added to KeyDimmer itself rather than shipped as a separate app sharing KeyDimmerCore. The selling point is replacing MidnightKeyboard and Lunar with a single menu bar app, and KeyDimmer already owns the hard-won plumbing — updates, Homebrew cask, shortcuts, login item, sleep/lid handling — so the name is expected to change later, not the app. The first version covers the keyboard and the built-in display only; external monitors (DDC and shades) follow in a 1.x release once they can be tested on real hardware, because an untested light would undercut the app's promise to leave macOS in a good state — not even behind an experimental flag.
