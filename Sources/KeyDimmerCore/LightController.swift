@@ -50,7 +50,8 @@ public final class LightController {
     public private(set) var displayLevel: Level? {
         didSet { if oldValue != nil, displayLevel != oldValue { followDisplay() } }
     }
-    /// Why the display's shades can't be selected right now (another gamma app is running), or nil.
+    /// Why the display's shades can't be selected right now, as the menu shows it ("Shades are off
+    /// while f.lux is running"), or nil.
     public private(set) var shadesUnavailableReason: String?
     public private(set) var pause: Pause?
     public private(set) var stats = HoldEngine.Stats()
@@ -244,7 +245,7 @@ public final class LightController {
         guard let keyboard, !isCalibrating, !newLevel.isShade else { return }
         trace("select \(newLevel.title)")
         level = newLevel
-        store.set(encode(newLevel), forKey: Keys.level)
+        store.set(newLevel.storageName, forKey: Keys.level)
         pause = nil
 
         switch newLevel {
@@ -273,7 +274,8 @@ public final class LightController {
     // MARK: - Display
 
     /// The display's floor: the dimmest macOS step. Shades are applied on top of it.
-    private static let displayFloor = Level.systemBrightness(step: 1)
+    private static let displayFloor = Level.system(step: 1)
+    private static let displayFloorBrightness = Level.systemBrightness(step: 1)
 
     /// Returns to the saved shade (macOS restored the picture when the last run ended), or shows
     /// the step macOS is at.
@@ -287,7 +289,7 @@ public final class LightController {
         if saved?.isShade != true { releaseDisplayAutoBrightness() }
         if let saved, saved.isShade {
             // Another gamma app is already running: the shade stands down to the floor, as it would have.
-            selectDisplay(shadesUnavailableReason == nil ? saved : .system(step: 1))
+            selectDisplay(shadesUnavailableReason == nil ? saved : Self.displayFloor)
         } else {
             displayLevel = displayLadder.nearestLevel(forBrightness: display.brightness())
         }
@@ -297,7 +299,7 @@ public final class LightController {
     private func quitDisplay() {
         guard displayLevel?.isShade == true else { return }
         restoreDisplayGamma()
-        setDisplayBrightness(Self.displayFloor)
+        setDisplayBrightness(Self.displayFloorBrightness)
         releaseDisplayAutoBrightness()
     }
 
@@ -317,7 +319,7 @@ public final class LightController {
         case let .shade(_, factor):
             // Automatic brightness would move the backlight off the floor under the shade.
             takeOverDisplayAutoBrightness()
-            setDisplayBrightness(Self.displayFloor)
+            setDisplayBrightness(Self.displayFloorBrightness)
             display?.setGamma(factor: factor)
             displayIsShaded = true
         case let .system(step):
@@ -356,7 +358,7 @@ public final class LightController {
         trace("display brightness notification \(brightness)")
         let level = displayLadder.nearestLevel(forBrightness: brightness)
         if displayLevel.isShade {
-            guard abs(brightness - Self.displayFloor) > 0.001 else { return }
+            guard abs(brightness - Self.displayFloorBrightness) > 0.001 else { return }
             restoreDisplayGamma()
             releaseDisplayAutoBrightness()
         } else if level == displayLevel {
@@ -366,21 +368,16 @@ public final class LightController {
         store.set(level.storageName, forKey: Keys.displayLevel)
     }
 
-    /// Remembers automatic brightness as first found, so moving between shades keeps the original.
     private func takeOverDisplayAutoBrightness() {
         guard let display else { return }
-        if store.object(forKey: Keys.displayAutoBrightnessToRestore) == nil {
-            store.set(display.isAutoBrightnessEnabled, forKey: Keys.displayAutoBrightnessToRestore)
-        }
-        display.setAutoBrightness(false)
+        takeOverAutoBrightness(recordedAt: Keys.displayAutoBrightnessToRestore,
+                               isEnabled: display.isAutoBrightnessEnabled, set: display.setAutoBrightness)
     }
 
     /// Without a display to drive, the record stays for a launch (or `builtInDisplayAppeared(_:)`) that has one.
     private func releaseDisplayAutoBrightness(on display: DisplayHardware? = nil) {
-        guard let display = display ?? self.display,
-              let auto = store.object(forKey: Keys.displayAutoBrightnessToRestore) as? Bool else { return }
-        display.setAutoBrightness(auto)
-        store.removeObject(forKey: Keys.displayAutoBrightnessToRestore)
+        guard let display = display ?? self.display else { return }
+        handBackAutoBrightness(recordedAt: Keys.displayAutoBrightnessToRestore, set: display.setAutoBrightness)
     }
 
     /// The built-in display came online while running without it (the lid opened in clamshell
@@ -425,7 +422,7 @@ public final class LightController {
         trace("gamma app launched \(bundleIdentifier)")
         runningGammaApps.append(bundleIdentifier)
         updateShadesUnavailableReason()
-        if displayLevel?.isShade == true { selectDisplay(.system(step: 1)) }
+        if displayLevel?.isShade == true { selectDisplay(Self.displayFloor) }
     }
 
     /// A gamma app quit. Once none is left, shades can be selected again; the display stays where it is.
@@ -439,7 +436,7 @@ public final class LightController {
     private func updateShadesUnavailableReason() {
         shadesUnavailableReason = runningGammaApps.first
             .flatMap(GammaApps.name(forBundleIdentifier:))
-            .map { "\($0) is running" }
+            .map { "Shades are off while \($0) is running" }
     }
 
     // MARK: - Link
@@ -456,8 +453,8 @@ public final class LightController {
     private func linkedKeyboardLevel(for displayLevel: Level) -> Level? {
         switch displayLevel {
         case let .shade(index, _):
-            let shadeCount = displayLadder?.levels.filter(\.isShade).count ?? 0
-            let emberCount = ladder.levels.filter(\.isEmber).count
+            let shadeCount = displayLadder?.shadeCount ?? 0
+            let emberCount = ladder.emberCount
             guard shadeCount > 0, emberCount > 0 else { return nil }
             let fraction = shadeCount > 1 ? Double(index - 1) / Double(shadeCount - 1) : 1
             return ladder.ember(1 + Int((fraction * Double(emberCount - 1)).rounded()))
@@ -533,7 +530,7 @@ public final class LightController {
         if activity == nil {
             activity = ProcessInfo.processInfo.beginActivity(
                 options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
-                reason: "Holding the keyboard backlight below the macOS minimum"
+                reason: "Holding the keyboard backlight on an ember, below its floor"
             )
         }
         engine?.hold(pwm: pwm)
@@ -555,20 +552,33 @@ public final class LightController {
     private func takeOverSystemFeatures() {
         guard let keyboard else { return }
         if engine?.phase != .holding { idleLimit = keyboard.idleDimTime() }
-        if store.object(forKey: Keys.autoBrightnessToRestore) == nil {
-            store.set(keyboard.isAutoBrightnessEnabled, forKey: Keys.autoBrightnessToRestore)
-        }
-        keyboard.setAutoBrightness(false)
+        takeOverAutoBrightness(recordedAt: Keys.autoBrightnessToRestore,
+                               isEnabled: keyboard.isAutoBrightnessEnabled, set: keyboard.setAutoBrightness)
         keyboard.setIdleDimmingSuspended(true)
     }
 
     private func releaseSystemFeatures() {
         guard let keyboard else { return }
         keyboard.setIdleDimmingSuspended(false)
-        if let auto = store.object(forKey: Keys.autoBrightnessToRestore) as? Bool {
-            keyboard.setAutoBrightness(auto)
-            store.removeObject(forKey: Keys.autoBrightnessToRestore)
-        }
+        handBackAutoBrightness(recordedAt: Keys.autoBrightnessToRestore, set: keyboard.setAutoBrightness)
+    }
+
+    // MARK: - Automatic brightness (either light)
+
+    /// Turns a light's automatic brightness off, recording under `key` how it was first found, so
+    /// moving between embers or shades keeps the original. The record is persisted, so a crash
+    /// leaves it for the next launch to hand back.
+    private func takeOverAutoBrightness(recordedAt key: String, isEnabled: Bool, set: (Bool) -> Void) {
+        if store.object(forKey: key) == nil { store.set(isEnabled, forKey: key) }
+        set(false)
+    }
+
+    /// Puts a light's automatic brightness back as recorded under `key` and clears the record;
+    /// does nothing without a record.
+    private func handBackAutoBrightness(recordedAt key: String, set: (Bool) -> Void) {
+        guard let auto = store.object(forKey: key) as? Bool else { return }
+        set(auto)
+        store.removeObject(forKey: key)
     }
 
     private func restoreAutoBrightnessAfterCrash() {
@@ -688,8 +698,6 @@ public final class LightController {
     }
 
     // MARK: - Persistence
-
-    private func encode(_ level: Level) -> String { level.storageName }
 
     /// Reads a keyboard level name ("off", "ember:3", "system:8") on this controller's ladder.
     public func decode(_ string: String) -> Level? { ladder.level(named: string) }

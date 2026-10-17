@@ -16,7 +16,7 @@ struct GammaConflictTests {
         #expect(controller.level(of: .display) == .system(step: 1))
         #expect(rig.display.gammaFactor == 1)
         #expect(rig.display.brightness() == Self.floor)
-        #expect(controller.shadesUnavailableReason == "f.lux is running")
+        #expect(controller.shadesUnavailableReason == "Shades are off while f.lux is running")
     }
 
     @Test func aGammaAppLaunchingWhileOnASystemStepLeavesItAloneAndShadesCannotBeSelected() {
@@ -27,7 +27,7 @@ struct GammaConflictTests {
 
         controller.otherGammaAppLaunched(bundleIdentifier: "pro.betterdisplay.BetterDisplay")
         #expect(controller.level(of: .display) == .system(step: 9))
-        #expect(controller.shadesUnavailableReason == "BetterDisplay is running")
+        #expect(controller.shadesUnavailableReason == "Shades are off while BetterDisplay is running")
 
         controller.select(Ladder.display().shade(5)!, on: .display)
         #expect(controller.level(of: .display) == .system(step: 9))
@@ -98,7 +98,7 @@ struct GammaConflictTests {
         controller.otherGammaAppLaunched(bundleIdentifier: "ca.michelf.GammaControl.6")
 
         controller.otherGammaAppQuit(bundleIdentifier: "me.guillaumeb.MonitorControl")
-        #expect(controller.shadesUnavailableReason == "Gamma Control is running")
+        #expect(controller.shadesUnavailableReason == "Shades are off while Gamma Control is running")
 
         controller.otherGammaAppQuit(bundleIdentifier: "ca.michelf.GammaControl.6")
         #expect(controller.shadesUnavailableReason == nil)
@@ -121,7 +121,7 @@ struct GammaConflictTests {
         #expect(next.level(of: .display) == .system(step: 1))
         #expect(rig.display.gammaCommands == gammaCommands)
         #expect(rig.display.brightness() == Self.floor)
-        #expect(next.shadesUnavailableReason == "Lunar is running")
+        #expect(next.shadesUnavailableReason == "Shades are off while Lunar is running")
     }
 
     @Test func onlyKnownGammaAppsConflict() {
@@ -141,7 +141,7 @@ struct GammaConflictTests {
             ("com.lowtechguys.GammaDimmer", "Gamma Dimmer"),
         ] {
             controller.otherGammaAppLaunched(bundleIdentifier: id)
-            #expect(controller.shadesUnavailableReason == "\(name) is running")
+            #expect(controller.shadesUnavailableReason == "Shades are off while \(name) is running")
             controller.otherGammaAppQuit(bundleIdentifier: id)
         }
     }

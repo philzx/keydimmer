@@ -120,6 +120,12 @@ public struct Ladder: Equatable, Sendable {
 
     public var count: Int { levels.count }
 
+    /// How many embers this ladder has (fewer than `Ladder.emberCount` on a very low floor).
+    public var emberCount: Int { levels.filter(\.isEmber).count }
+
+    /// How many shades this ladder has.
+    public var shadeCount: Int { levels.filter(\.isShade).count }
+
     public func index(of level: Level) -> Int? { levels.firstIndex(of: level) }
 
     public func level(at index: Int) -> Level { levels[min(max(index, 0), levels.count - 1)] }

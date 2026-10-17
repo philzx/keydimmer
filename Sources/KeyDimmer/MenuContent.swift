@@ -89,7 +89,7 @@ struct MenuContent: View {
             .onKeyPress(keys: [.leftArrow, .downArrow]) { _ in model.stepDisplay(by: -1); return .handled }
             .onKeyPress(keys: [.rightArrow, .upArrow]) { _ in model.stepDisplay(by: 1); return .handled }
             if let reason = model.shadesUnavailableReason {
-                Label("Shades are off while \(reason)", systemImage: "exclamationmark.triangle")
+                Label(reason, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -182,7 +182,7 @@ struct MenuContent: View {
     private var takenShortcuts: String? {
         let symbols = model.hotkeyModifiers.symbols
         let keys = [Light.keyboard, .display].filter(model.unavailableShortcuts.contains).map {
-            $0 == .display ? "\(symbols)⇧↑/↓" : "\(symbols)↑/↓"
+            "\(symbols)\(Self.shift(for: $0))↑/↓"
         }
         return keys.isEmpty ? nil : keys.joined(separator: " and ") + " are"
     }
@@ -196,13 +196,25 @@ struct MenuContent: View {
         }
     }
 
+    /// "⇧" if the light's shortcuts add ⇧ to the configured modifiers (`Shortcut.all`), else "".
+    private static func shift(for light: Light) -> String {
+        Shortcut.all.contains { $0.light == light && $0.addsShift } ? "⇧" : ""
+    }
+
     /// The keyboard's arrows, plus a reminder of the display's ⇧; only for the lights this Mac has.
     private func shortcutsTitle(_ modifiers: HotKeys.Modifiers) -> String {
         let symbols = modifiers.symbols
+        func arrows(_ light: Light) -> String {
+            let shift = Self.shift(for: light)
+            return "\(symbols)\(shift)↑ \(symbols)\(shift)↓"
+        }
         switch (model.hasKeyboard, model.hasDisplay) {
-        case (true, true): return "\(symbols)↑ \(symbols)↓ (+⇧ display)"
-        case (false, true): return "\(symbols)⇧↑ \(symbols)⇧↓"
-        default: return "\(symbols)↑ \(symbols)↓"
+        case (true, true):
+            let displayShift = Self.shift(for: .display)
+            return displayShift == Self.shift(for: .keyboard)
+                ? arrows(.keyboard) : "\(arrows(.keyboard)) (+\(displayShift) display)"
+        case (false, true): return arrows(.display)
+        default: return arrows(.keyboard)
         }
     }
 
@@ -357,12 +369,10 @@ struct LadderSlider: View {
         case .off:
             return .clear
         case let .ember(i, _):
-            let embers = ladder.levels.filter(\.isEmber).count
-            let t = Double(i) / Double(max(embers, 1))
+            let t = Double(i) / Double(max(ladder.emberCount, 1))
             return active ? Brand.ember.opacity(0.35 + 0.65 * t) : Brand.ember.opacity(0.12 + 0.1 * t)
         case let .shade(i, _):
-            let shades = ladder.levels.filter(\.isShade).count
-            let t = Double(i) / Double(max(shades, 1))
+            let t = Double(i) / Double(max(ladder.shadeCount, 1))
             return active ? Brand.shade.opacity(0.35 + 0.65 * t) : Brand.shade.opacity(0.12 + 0.1 * t)
         case let .system(step):
             let t = Double(step) / Double(Ladder.systemSteps)
