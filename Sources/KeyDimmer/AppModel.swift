@@ -174,7 +174,11 @@ final class AppModel {
 
     func select(index: Int) { select(ladder.level(at: index)) }
 
-    func step(by delta: Int) { select(index: levelIndex + delta) }
+    /// Does nothing at either end, where a held shortcut keeps repeating.
+    func step(by delta: Int) {
+        let index = min(max(levelIndex + delta, 0), ladder.count - 1)
+        if index != levelIndex { select(index: index) }
+    }
 
     func select(_ newLevel: Level) {
         // A probe in flight owns the backlight; it re-selects the level when it finishes.

@@ -1,7 +1,8 @@
+import AppKit
 import Carbon.HIToolbox
-import Foundation
 
-/// System-wide modifier + ↓ / ↑ to step the slider. Carbon hot keys need no Accessibility permission.
+/// System-wide modifier + ↓ / ↑ to step the slider, repeating while held like any other key.
+/// Carbon hot keys need no Accessibility permission.
 @MainActor
 final class HotKeys {
     /// The modifier pairs on offer; the arrows themselves are fixed.
@@ -28,6 +29,15 @@ final class HotKeys {
             case .controlCommand: return controlKey | cmdKey
             case .optionCommand: return optionKey | cmdKey
             case .controlOptionCommand: return controlKey | optionKey | cmdKey
+            }
+        }
+
+        fileprivate var flags: NSEvent.ModifierFlags {
+            switch self {
+            case .controlOption: return [.control, .option]
+            case .controlCommand: return [.control, .command]
+            case .optionCommand: return [.option, .command]
+            case .controlOptionCommand: return [.control, .option, .command]
             }
         }
     }
@@ -61,9 +71,13 @@ final class HotKeys {
 
     private var refs: [EventHotKeyRef] = []
     private var handler: EventHandlerRef?
+    /// Carbon reports a press once, never as repeats, so holding the keys is timed here.
+    private var repeatTimer: Timer?
 
     private func register() {
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        var specs = [kEventHotKeyPressed, kEventHotKeyReleased].map {
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32($0))
+        }
         let context = Unmanaged.passUnretained(self).toOpaque()
         InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
             guard let event, let context else { return OSStatus(eventNotHandledErr) }
@@ -73,9 +87,10 @@ final class HotKeys {
             let hotKeys = Unmanaged<HotKeys>.fromOpaque(context).takeUnretainedValue()
             guard id.signature == HotKeys.signature,
                   let binding = HotKeys.bindings.first(where: { $0.id == id.id }) else { return OSStatus(eventNotHandledErr) }
-            MainActor.assumeIsolated { hotKeys.onStep?(binding.delta) }
+            let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
+            MainActor.assumeIsolated { pressed ? hotKeys.pressed(binding.delta) : hotKeys.stopRepeating() }
             return noErr
-        }, 1, &spec, context, &handler)
+        }, specs.count, &specs, context, &handler)
 
         var failed = false
         for binding in Self.bindings {
@@ -89,7 +104,34 @@ final class HotKeys {
         registrationFailed = failed
     }
 
+    /// Steps once, then again after the system's key repeat delay and at its repeat rate until released.
+    private func pressed(_ delta: Int) {
+        onStep?(delta)
+        schedule(after: NSEvent.keyRepeatDelay) { [weak self] in self?.repeatStep(delta) }
+    }
+
+    private func repeatStep(_ delta: Int) {
+        // A release isn't always reported when the modifiers come up before the arrow.
+        guard NSEvent.modifierFlags.contains(modifiers.flags) else { return stopRepeating() }
+        onStep?(delta)
+        schedule(after: NSEvent.keyRepeatInterval) { [weak self] in self?.repeatStep(delta) }
+    }
+
+    private func schedule(after interval: TimeInterval, _ action: @escaping @MainActor () -> Void) {
+        repeatTimer?.invalidate()
+        let timer = Timer(timeInterval: interval, repeats: false) { _ in MainActor.assumeIsolated(action) }
+        // .common so it keeps firing while the menu is being tracked.
+        RunLoop.main.add(timer, forMode: .common)
+        repeatTimer = timer
+    }
+
+    private func stopRepeating() {
+        repeatTimer?.invalidate()
+        repeatTimer = nil
+    }
+
     private func unregister() {
+        stopRepeating()
         refs.forEach { UnregisterEventHotKey($0) }
         refs.removeAll()
         if let handler { RemoveEventHandler(handler) }
