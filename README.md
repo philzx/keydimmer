@@ -29,12 +29,19 @@ Requires an Apple Silicon MacBook with a backlit keyboard and macOS 14 or later.
 
 ## Install
 
-Download the latest `.dmg` from [Releases](https://github.com/philzx/keydimmer/releases/latest), open
+```sh
+brew install --cask philzx/tap/keydimmer
+```
+
+Or download the latest `.dmg` from [Releases](https://github.com/philzx/keydimmer/releases/latest), open
 it and drag KeyDimmer to Applications.
 
 KeyDimmer isn't notarised by Apple, so macOS blocks it the first time you open it. Go to
 **System Settings → Privacy & Security** and click **Open Anyway** — only needed once. Or, in
-Terminal: `xattr -dr com.apple.quarantine /Applications/KeyDimmer.app`.
+Terminal: `xattr -dr com.apple.quarantine /Applications/KeyDimmer.app`. (Homebrew installs skip this.)
+
+KeyDimmer checks GitHub daily and offers updates in its menu; it installs them itself, or through
+`brew upgrade` if Homebrew installed it.
 
 ## How it works
 
