@@ -109,6 +109,7 @@ final class AppModel {
     private let hotKeys = HotKeys()
     private var power: PowerObserver?
     private var apps: AppLaunchObserver?
+    private var screens: NSObjectProtocol?
 
     init() {
         let defaults = UserDefaults.standard
@@ -204,6 +205,20 @@ final class AppModel {
             }
         }
         controller.start()
+        // Launched in clamshell mode: the built-in display isn't driven this run, but once it comes
+        // online the controller can hand back what a crash on a shade left behind.
+        if !controller.has(.display) {
+            screens = NotificationCenter.default.addObserver(
+                forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.builtInDisplayMayHaveAppeared() }
+            }
+        }
+    }
+
+    private func builtInDisplayMayHaveAppeared() {
+        guard let builtIn = try? BuiltInDisplay() else { return }
+        controller?.builtInDisplayAppeared(builtIn)
     }
 
     func prepareForQuit() { controller?.willQuit() }

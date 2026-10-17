@@ -116,6 +116,32 @@ struct DisplayStepAsideTests {
         #expect(rig.display.isAutoBrightnessEnabled)
     }
 
+    /// In clamshell mode the built-in display is offline, so a launch there has no display light.
+    @Test func aLaunchWithoutTheBuiltInDisplayKeepsTheCrashRecordForTheNextLaunchThatHasIt() {
+        let rig = Rig()
+        rig.launch().select(Ladder.display().shade(4)!, on: .display)
+        rig.display.restoreGamma()
+
+        rig.launch(with: [.keyboard]).willQuit()
+        #expect(rig.display.isAutoBrightnessEnabled == false)
+
+        let next = rig.launch()
+        next.select(.system(step: 3), on: .display)
+        #expect(rig.display.isAutoBrightnessEnabled)
+    }
+
+    @Test func theCrashRecordIsHandedBackWhenTheBuiltInDisplayComesOnlineWhileRunning() {
+        let rig = Rig()
+        rig.launch().select(Ladder.display().shade(4)!, on: .display)
+        rig.display.restoreGamma()
+        let controller = rig.launch(with: [.keyboard])
+
+        controller.builtInDisplayAppeared(rig.display)
+
+        #expect(rig.display.isAutoBrightnessEnabled)
+        #expect(rig.store.object(forKey: "displayAutoBrightnessToRestore") == nil)
+    }
+
     @Test func relaunchingOnAShadeKeepsAutomaticBrightnessPausedAndStillRemembersIt() {
         let rig = Rig()
         rig.launch().select(Ladder.display().shade(4)!, on: .display)

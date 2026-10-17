@@ -375,10 +375,21 @@ public final class LightController {
         display.setAutoBrightness(false)
     }
 
-    private func releaseDisplayAutoBrightness() {
-        guard let display, let auto = store.object(forKey: Keys.displayAutoBrightnessToRestore) as? Bool else { return }
+    /// Without a display to drive, the record stays for a launch (or `builtInDisplayAppeared(_:)`) that has one.
+    private func releaseDisplayAutoBrightness(on display: DisplayHardware? = nil) {
+        guard let display = display ?? self.display,
+              let auto = store.object(forKey: Keys.displayAutoBrightnessToRestore) as? Bool else { return }
         display.setAutoBrightness(auto)
         store.removeObject(forKey: Keys.displayAutoBrightnessToRestore)
+    }
+
+    /// The built-in display came online while running without it (the lid opened in clamshell
+    /// mode). This run doesn't drive it, but automatic brightness that a crash on a shade left
+    /// paused is handed back now rather than at the next launch.
+    public func builtInDisplayAppeared(_ builtIn: DisplayHardware) {
+        guard display == nil else { return }
+        trace("built-in display appeared")
+        releaseDisplayAutoBrightness(on: builtIn)
     }
 
     /// Takes the shade off for sleep, remembering it so waking can put it back.
