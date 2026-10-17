@@ -11,6 +11,9 @@ enum StatusIcon {
             case let .ember(index, _):
                 let embers = ladder.levels.filter(\.isEmber).count
                 return 0.08 + 0.32 * CGFloat(index) / CGFloat(max(embers, 1))
+            case let .shade(index, _):
+                let shades = ladder.levels.filter(\.isShade).count
+                return 0.08 + 0.32 * CGFloat(index) / CGFloat(max(shades, 1))
             case let .system(step): return 0.4 + 0.6 * CGFloat(step) / CGFloat(Ladder.systemSteps)
             }
         }()

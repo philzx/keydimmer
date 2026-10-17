@@ -3,6 +3,7 @@ import SwiftUI
 
 enum Brand {
     static let ember = Color(red: 1.0, green: 0.55, blue: 0.2)
+    static let shade = Color(red: 0.45, green: 0.5, blue: 0.95)
     static let tagline = "Below the bottom step."
 }
 
@@ -286,6 +287,10 @@ struct LadderSlider: View {
             let embers = ladder.levels.filter(\.isEmber).count
             let t = Double(i) / Double(max(embers, 1))
             return active ? Brand.ember.opacity(0.35 + 0.65 * t) : Brand.ember.opacity(0.12 + 0.1 * t)
+        case let .shade(i, _):
+            let shades = ladder.levels.filter(\.isShade).count
+            let t = Double(i) / Double(max(shades, 1))
+            return active ? Brand.shade.opacity(0.35 + 0.65 * t) : Brand.shade.opacity(0.12 + 0.1 * t)
         case let .system(step):
             let t = Double(step) / Double(Ladder.systemSteps)
             return active ? Color.accentColor.opacity(0.45 + 0.55 * t) : Color.secondary.opacity(0.18)

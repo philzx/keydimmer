@@ -126,7 +126,7 @@ public final class LightController {
 
     public func select(_ newLevel: Level) {
         // A probe in flight owns the backlight; it re-selects the level when it finishes.
-        guard !isCalibrating else { return }
+        guard !isCalibrating, !newLevel.isShade else { return }
         trace("select \(newLevel.title)")
         level = newLevel
         store.set(encode(newLevel), forKey: Keys.level)
@@ -150,6 +150,8 @@ public final class LightController {
                 self.level = ember
                 self.startHolding(pwm: pwm)
             }
+        case .shade:
+            break // The keyboard has no shades (guarded above).
         }
     }
 
@@ -345,7 +347,7 @@ public final class LightController {
             switch level {
             case .off: return 0
             case let .system(step): return Level.systemBrightness(step: step)
-            case .ember: return 0
+            case .ember, .shade: return 0
             }
         }()
         if abs(value - current) > 0.001 {
@@ -361,22 +363,8 @@ public final class LightController {
 
     // MARK: - Persistence
 
-    private func encode(_ level: Level) -> String {
-        switch level {
-        case .off: return "off"
-        case let .ember(index, _): return "ember:\(index)"
-        case let .system(step): return "system:\(step)"
-        }
-    }
+    private func encode(_ level: Level) -> String { level.storageName }
 
-    /// Reads a level name ("off", "ember:3", "system:8") on this controller's ladder.
-    public func decode(_ string: String) -> Level? {
-        let parts = string.split(separator: ":")
-        switch (parts.first, parts.count > 1 ? Int(parts[1]) : nil) {
-        case ("off", _): return .off
-        case let ("ember", index?): return ladder.ember(index)
-        case let ("system", step?): return .system(step: min(max(step, 1), Ladder.systemSteps))
-        default: return nil
-        }
-    }
+    /// Reads a keyboard level name ("off", "ember:3", "system:8") on this controller's ladder.
+    public func decode(_ string: String) -> Level? { ladder.level(named: string) }
 }
