@@ -118,10 +118,31 @@ struct MenuContent: View {
                         .help("Measure the dimmest level macOS allows on this Mac again")
                 }
             }
-            settingRow("Check for updates", isOn: Binding(
-                get: { model.updates.isEnabled },
-                set: { model.updates.isEnabled = $0 }
-            ))
+            HStack {
+                Text("Check for updates")
+                if let result = updateCheckDescription {
+                    Text(result).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Check Now") { model.updates.checkNow() }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    .disabled(!model.updates.canCheck || model.updates.isChecking || model.updates.isInstalling)
+                    .help("Ask GitHub for a newer release now")
+                switchToggle("Check for updates", isOn: Binding(
+                    get: { model.updates.isEnabled },
+                    set: { model.updates.isEnabled = $0 }
+                ))
+            }
+        }
+    }
+
+    private var updateCheckDescription: String? {
+        if model.updates.isChecking { return "checking…" }
+        switch model.updates.checkResult {
+        case .upToDate?: return "up to date"
+        case .failed?: return "check failed"
+        case nil: return nil
         }
     }
 
