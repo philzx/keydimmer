@@ -154,6 +154,75 @@ struct DisplayLightTests {
         #expect(rig.display.brightnessCommands == brightnessCommands)
     }
 
+    // MARK: - Sleep, wake and lock
+
+    @Test func sleepRemovesTheShadeAndWakingReappliesItOneSecondLater() {
+        let rig = Rig()
+        let controller = rig.launch()
+        let shade3 = Ladder.display().shade(3)
+        controller.select(shade3!, on: .display)
+
+        controller.willSleep()
+        #expect(rig.display.gammaFactor == 1)
+        #expect(controller.level(of: .display) == shade3)
+
+        controller.didWake()
+        rig.run(for: 0.9)
+        #expect(rig.display.gammaFactor == 1)
+        rig.run(for: 0.2)
+        #expect(rig.display.gammaFactor == factor(shade3))
+        #expect(rig.display.brightness() == Self.floor)
+    }
+
+    @Test func wakingLeavesALevelTheUserChoseDuringTheGraceAlone() {
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.select(index: 2, on: .display)
+        controller.willSleep()
+        controller.didWake()
+
+        controller.select(.system(step: 6), on: .display)
+        rig.run(for: 5)
+
+        #expect(controller.level(of: .display) == .system(step: 6))
+        #expect(rig.display.gammaFactor == 1)
+        #expect(rig.display.brightness() == Level.systemBrightness(step: 6))
+    }
+
+    @Test func wakingTwiceAndSleepingAgainBeforeTheGraceEndsLeavesThePictureUnshaded() {
+        // Sleep, then display sleep, then their two wakes: macOS sends both.
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.select(index: 2, on: .display)
+        controller.willSleep()
+        controller.willSleep()
+        controller.didWake()
+        controller.didWake()
+        rig.run(for: 0.5)
+
+        controller.willSleep()
+        rig.run(for: 5)
+        #expect(rig.display.gammaFactor == 1)
+
+        controller.didWake()
+        rig.run(for: 1.1)
+        #expect(rig.display.gammaFactor == factor(Ladder.display().shade(3)))
+    }
+
+    @Test func sleepLeavesTheDisplaysSystemStepsToMacOS() {
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.select(.system(step: 4), on: .display)
+        let commands = rig.display.brightnessCommands + rig.display.gammaCommands
+
+        controller.willSleep()
+        controller.didWake()
+        rig.run(for: 5)
+
+        #expect(controller.level(of: .display) == .system(step: 4))
+        #expect(rig.display.brightnessCommands + rig.display.gammaCommands == commands)
+    }
+
     // MARK: - Launch, quit and persistence
 
     @Test func launchingShowsTheSystemStepMacOSIsAt() {

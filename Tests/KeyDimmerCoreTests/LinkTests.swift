@@ -90,4 +90,19 @@ struct LinkTests {
 
         #expect(next.isLinked)
     }
+
+    @Test(arguments: [Set<Light>([.keyboard]), Set<Light>([.display])])
+    func theLinkDoesNothingUnlessThisMacHasBothLights(lights: Set<Light>) {
+        let rig = Rig()
+        let controller = rig.launch(with: lights)
+        let commands = rig.backlight.commands
+
+        controller.isLinked = true
+        controller.select(displayLadder.shade(8)!, on: .display)
+        rig.run(for: 2)
+
+        #expect(!controller.isLinked)
+        #expect(rig.store.object(forKey: "isLinked") == nil)
+        #expect(rig.backlight.commands == commands)
+    }
 }

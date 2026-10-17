@@ -18,7 +18,8 @@ struct MenuContent: View {
                 Label(reason, systemImage: "exclamationmark.triangle")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-            } else {
+            }
+            if model.hasKeyboard {
                 LadderSlider(ladder: model.ladder, index: model.levelIndex, name: "Keyboard brightness") {
                     model.select(index: $0)
                 }
@@ -30,7 +31,7 @@ struct MenuContent: View {
                 status
             }
             if let ladder = model.displayLadder, let level = model.displayLevel {
-                Divider()
+                if model.hasKeyboard { Divider() }
                 displaySection(ladder: ladder, level: level)
             }
             Divider()
@@ -41,7 +42,7 @@ struct MenuContent: View {
         .padding(16)
         .frame(width: 320)
         .onAppear {
-            focusedSlider = .keyboard
+            focusedSlider = model.hasKeyboard ? .keyboard : .display
             model.refreshLaunchAtLogin()
         }
     }
@@ -53,14 +54,18 @@ struct MenuContent: View {
                 Text(Brand.tagline).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(model.level.title)
-                    .font(.system(.title3, design: .rounded).weight(.semibold))
-                    .foregroundStyle(model.level.isEmber ? Brand.ember : .primary)
-                    .contentTransition(.numericText())
-                if let duty = model.dutyDescription {
-                    Text("duty \(duty)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }
+            if model.hasKeyboard { keyboardLevel }
+        }
+    }
+
+    private var keyboardLevel: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(model.level.title)
+                .font(.system(.title3, design: .rounded).weight(.semibold))
+                .foregroundStyle(model.level.isEmber ? Brand.ember : .primary)
+                .contentTransition(.numericText())
+            if let duty = model.dutyDescription {
+                Text("duty \(duty)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
         }
     }
@@ -131,11 +136,11 @@ struct MenuContent: View {
             if model.hotkeysEnabled, model.hotkeysUnavailable {
                 notice("\(model.hotkeyModifiers.symbols)↑/↓ are taken by another app. Choose other keys.")
             }
-            settingRow("Turn off with macOS inactivity timer", isOn: $model.followsInactivity)
-            if model.displayLadder != nil {
+            if model.hasKeyboard, model.hasDisplay {
                 settingRow("Keyboard follows display", isOn: $model.isLinked)
             }
-            if model.isSupported {
+            if model.hasKeyboard {
+                settingRow("Turn off with macOS inactivity timer", isOn: $model.followsInactivity)
                 HStack {
                     Text("macOS floor")
                     Text(model.calibrationFailed ? "measuring failed" : model.floorDescription ?? "not measured")
