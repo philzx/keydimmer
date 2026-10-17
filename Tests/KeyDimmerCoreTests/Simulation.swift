@@ -65,6 +65,8 @@ final class SimulatedBacklight: BacklightHardware {
     var isAutoBrightnessEnabled = true
     var idleSuspended = false
     var lidClosed = false
+    /// The user's "turn keyboard backlight off after inactivity" setting; 0 means never.
+    var idleDimSeconds: TimeInterval = 0
 
     init(clock: FakeClock, floorPWM: Double = 54, slope: Double = 282, startPWM: Double = 70,
          durations: [Int32: TimeInterval] = [500_000: 41, 2_000: 2, 350: 0.36, 0: 0], latency: TimeInterval = 0) {
@@ -108,7 +110,7 @@ final class SimulatedBacklight: BacklightHardware {
 
     func setAutoBrightness(_ enabled: Bool) { isAutoBrightnessEnabled = enabled }
     func setIdleDimmingSuspended(_ suspended: Bool) { idleSuspended = suspended }
-    func idleDimTime() -> TimeInterval { 0 }
+    func idleDimTime() -> TimeInterval { idleDimSeconds }
     func isLidClosed() -> Bool { lidClosed }
     func observeBrightness(_ handler: @escaping (Float) -> Void) { brightnessHandlers.append(handler) }
 }
