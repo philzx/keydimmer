@@ -20,6 +20,7 @@ final class AppModel {
     private(set) var unsupportedReason: String?
     private(set) var stats = HoldEngine.Stats()
     private(set) var isCalibrating = false
+    let updates = UpdateChecker()
 
     var hotkeysEnabled: Bool {
         didSet {
@@ -102,6 +103,7 @@ final class AppModel {
     // MARK: - Lifecycle
 
     func start() {
+        updates.start()
         guard let hardware, isSupported else { return }
         restoreAutoBrightnessAfterCrash()
 

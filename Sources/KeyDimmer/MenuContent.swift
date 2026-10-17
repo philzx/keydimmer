@@ -82,6 +82,10 @@ struct MenuContent: View {
             ))
             settingRow("Global shortcuts", detail: "⌃⌥↑ ⌃⌥↓", isOn: $model.hotkeysEnabled)
             settingRow("Turn off with macOS inactivity timer", isOn: $model.followsInactivity)
+            settingRow("Check for updates", isOn: Binding(
+                get: { model.updates.isEnabled },
+                set: { model.updates.isEnabled = $0 }
+            ))
         }
     }
 
@@ -101,9 +105,17 @@ struct MenuContent: View {
 
     private var footer: some View {
         HStack {
-            Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            if let release = model.updates.available {
+                Button { model.updates.openReleasePage() } label: {
+                    Label("Update to v\(release.version)", systemImage: "arrow.down.circle.fill")
+                        .font(.caption)
+                }
+                .buttonStyle(.link)
+            } else {
+                Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
             Spacer()
             Button("Quit KeyDimmer") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")

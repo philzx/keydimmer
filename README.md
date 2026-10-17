@@ -22,9 +22,19 @@
   and hands automatic brightness back exactly as it found it.
 - **Leaves things tidy.** Quitting while on an ember leaves the keyboard at the dimmest level macOS
   can keep on its own.
-- No accounts, analytics or network access. ~0% CPU while holding.
+- No accounts or analytics. The only network access is a daily check for new releases on GitHub,
+  which you can turn off in the menu. ~0% CPU while holding.
 
 Requires an Apple Silicon MacBook with a backlit keyboard and macOS 14 or later.
+
+## Install
+
+Download the latest `.dmg` from [Releases](https://github.com/philzx/keydimmer/releases/latest), open
+it and drag KeyDimmer to Applications.
+
+KeyDimmer isn't notarised by Apple, so macOS blocks it the first time you open it. Go to
+**System Settings → Privacy & Security** and click **Open Anyway** — only needed once. Or, in
+Terminal: `xattr -dr com.apple.quarantine /Applications/KeyDimmer.app`.
 
 ## How it works
 
@@ -47,6 +57,9 @@ distance. The [hold engine](Sources/KeyDimmerCore/HoldEngine.swift):
 ./scripts/build-app.sh          # → build/KeyDimmer.app (ad-hoc signed)
 open build/KeyDimmer.app
 ```
+
+`VERSION=1.2.0 ./scripts/package.sh` also builds `dist/KeyDimmer-1.2.0.dmg` and `.zip`. Pushing a
+`v*` tag does the same on GitHub Actions and publishes a release.
 
 Set `SIGN_IDENTITY="Developer ID Application: …"` to sign for distribution (notarise afterwards).
 
