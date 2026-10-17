@@ -37,7 +37,7 @@ final class Rig {
     /// Launches KeyDimmer.
     func launch() -> LightController {
         let controller = LightController(
-            hardware: backlight, display: display, clock: clock, store: store,
+            keyboard: backlight, display: display, clock: clock, store: store,
             secondsSinceLastInput: { [unowned self] in self.secondsIdle },
             hardwareModel: Self.model, osBuild: Self.build
         )
@@ -185,6 +185,37 @@ struct LightControllerTests {
 
         #expect(controller.level == controller.ladder.ember(5))
         #expect(rig.backlight.pwm == emberPWM(controller, 5))
+    }
+
+    @Test func aLateEchoOfTheHoldEnginesGoalAfterLeavingAnEmberDoesNotTurnTheKeyboardOff() {
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.select(index: 12)
+        rig.run(for: 30)
+        controller.select(.system(step: 1))
+        rig.run(for: 1)
+
+        // CoreBrightness reports the hold engine's last goal after we've already moved on.
+        controller.brightnessChanged(to: 0)
+        rig.run(for: 1)
+
+        #expect(controller.level == .system(step: 1))
+        #expect(rig.store.object(forKey: "level") as? String == "system:1")
+    }
+
+    @Test func aLateEchoOfTheDimmestStepAfterSelectingAnEmberDoesNotTakeOverTheEmber() {
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.select(.system(step: 1))
+        rig.run(for: 1)
+        controller.select(index: 12)
+        rig.run(for: 30)
+
+        controller.brightnessChanged(to: Level.systemBrightness(step: 1))
+        rig.run(for: 30)
+
+        #expect(controller.level == controller.ladder.ember(12))
+        #expect(rig.backlight.pwm == emberPWM(controller, 12))
     }
 
     @Test func aSystemStepFollowsBrightnessChangesMadeElsewhere() {

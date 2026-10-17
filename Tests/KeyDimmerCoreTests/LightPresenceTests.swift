@@ -6,7 +6,7 @@ extension Rig {
     /// Launches KeyDimmer on a Mac that has only the given lights.
     func launch(with lights: Set<Light>) -> LightController {
         let controller = LightController(
-            hardware: lights.contains(.keyboard) ? backlight : nil,
+            keyboard: lights.contains(.keyboard) ? backlight : nil,
             display: lights.contains(.display) ? display : nil,
             clock: clock, store: store,
             secondsSinceLastInput: { [unowned self] in self.secondsIdle },

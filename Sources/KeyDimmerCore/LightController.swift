@@ -84,14 +84,14 @@ public final class LightController {
     /// Diagnostics trace (KEYDIMMER_TRACE in the app).
     @ObservationIgnored public var onTrace: ((String) -> Void)?
 
-    public var totalPeriod: Int { hardware?.totalPeriod ?? 0 }
+    public var totalPeriod: Int { keyboard?.totalPeriod ?? 0 }
 
     /// The lights this Mac has, in menu order. Shortcuts and Link should only act on these.
     public var lights: [Light] { Light.allCases.filter(has) }
 
     public func has(_ light: Light) -> Bool {
         switch light {
-        case .keyboard: return hardware != nil
+        case .keyboard: return keyboard != nil
         case .display: return display != nil
         }
     }
@@ -110,7 +110,7 @@ public final class LightController {
     }
 
     /// The keyboard backlight; nil if this Mac has none KeyDimmer can drive.
-    @ObservationIgnored private let hardware: BacklightHardware?
+    @ObservationIgnored private let keyboard: BacklightHardware?
     @ObservationIgnored private let display: DisplayHardware?
     /// Whether the display's gamma table is one of our shades.
     @ObservationIgnored private var displayIsShaded = false
@@ -136,16 +136,16 @@ public final class LightController {
     @ObservationIgnored private var idleLimit: TimeInterval = 0
 
     /// - Parameters:
-    ///   - hardware: the keyboard backlight, or nil if this Mac has none KeyDimmer can drive.
+    ///   - keyboard: the keyboard backlight, or nil if this Mac has none KeyDimmer can drive.
     ///   - display: the built-in display, or nil if this Mac has none KeyDimmer can drive.
     ///   - secondsSinceLastInput: time since the user last touched any input device.
     ///   - hardwareModel, osBuild: identify this Mac and macOS build for the floor cache.
     public init(
-        hardware: BacklightHardware?, display: DisplayHardware? = nil, clock: EngineClock, store: SettingsStore,
+        keyboard: BacklightHardware?, display: DisplayHardware? = nil, clock: EngineClock, store: SettingsStore,
         secondsSinceLastInput: @escaping () -> TimeInterval,
         hardwareModel: String = FloorProbe.hardwareModel, osBuild: String = FloorProbe.osBuild
     ) {
-        self.hardware = hardware
+        self.keyboard = keyboard
         self.display = display
         displayLadder = display.map { _ in Ladder.display() }
         self.clock = clock
@@ -174,12 +174,12 @@ public final class LightController {
     }
 
     private func startKeyboard() {
-        guard let hardware else { return }
+        guard let keyboard else { return }
         restoreAutoBrightnessAfterCrash()
         if let saved = (store.object(forKey: Keys.level) as? String).flatMap(decode), saved.isEmber {
             select(saved)
         } else {
-            level = ladder.nearestLevel(forBrightness: hardware.brightness())
+            level = ladder.nearestLevel(forBrightness: keyboard.brightness())
         }
     }
 
@@ -190,10 +190,10 @@ public final class LightController {
     }
 
     private func quitKeyboard() {
-        guard let hardware else { return }
+        guard let keyboard else { return }
         engine?.stop()
         if level.isEmber {
-            hardware.setBrightness(HoldEngine.Tuning().floorGoal, fadeSpeed: 350, commit: true)
+            keyboard.setBrightness(HoldEngine.Tuning().floorGoal, fadeSpeed: 350, commit: true)
         }
         releaseSystemFeatures()
     }
@@ -203,7 +203,7 @@ public final class LightController {
     /// The light's ladder; nil if this Mac doesn't have the light.
     public func ladder(of light: Light) -> Ladder? {
         switch light {
-        case .keyboard: return hardware == nil ? nil : ladder
+        case .keyboard: return keyboard == nil ? nil : ladder
         case .display: return displayLadder
         }
     }
@@ -211,7 +211,7 @@ public final class LightController {
     /// The light's current level; nil if this Mac doesn't have the light.
     public func level(of light: Light) -> Level? {
         switch light {
-        case .keyboard: return hardware == nil ? nil : level
+        case .keyboard: return keyboard == nil ? nil : level
         case .display: return displayLevel
         }
     }
@@ -241,7 +241,7 @@ public final class LightController {
 
     public func select(_ newLevel: Level) {
         // A probe in flight owns the backlight; it re-selects the level when it finishes.
-        guard let hardware, !isCalibrating, !newLevel.isShade else { return }
+        guard let keyboard, !isCalibrating, !newLevel.isShade else { return }
         trace("select \(newLevel.title)")
         level = newLevel
         store.set(encode(newLevel), forKey: Keys.level)
@@ -250,11 +250,11 @@ public final class LightController {
         switch newLevel {
         case .off:
             stopHolding()
-            hardware.setBrightness(0, fadeSpeed: 350, commit: true)
+            keyboard.setBrightness(0, fadeSpeed: 350, commit: true)
             releaseSystemFeatures()
         case let .system(step):
             stopHolding()
-            hardware.setBrightness(Level.systemBrightness(step: step), fadeSpeed: 350, commit: true)
+            keyboard.setBrightness(Level.systemBrightness(step: step), fadeSpeed: 350, commit: true)
             releaseSystemFeatures()
         case let .ember(index, _):
             takeOverSystemFeatures()
@@ -472,9 +472,9 @@ public final class LightController {
 
     /// Keeps the previous floor if the measurement fails.
     private func measureFloor(_ completion: @escaping (Bool) -> Void) {
-        guard let hardware else { return completion(false) }
+        guard let keyboard else { return completion(false) }
         isCalibrating = true
-        FloorProbe.measure(hardware: hardware, clock: clock) { [weak self] floor in
+        FloorProbe.measure(hardware: keyboard, clock: clock) { [weak self] floor in
             guard let self else { return }
             self.isCalibrating = false
             if let floor {
@@ -489,7 +489,7 @@ public final class LightController {
 
     /// Measures the floor again, then returns to the current level on the (possibly rebuilt) ladder.
     public func recalibrate() {
-        guard hardware != nil, !isCalibrating else { return }
+        guard keyboard != nil, !isCalibrating else { return }
         trace("recalibrate")
         stopHolding()
         // Auto-brightness or idle dimming fading mid-probe would spoil the reading.
@@ -505,10 +505,10 @@ public final class LightController {
     // MARK: - Holding
 
     private func startHolding(pwm: Int) {
-        guard let hardware else { return }
+        guard let keyboard else { return }
         if engine == nil || engine?.floorPWM != ladder.floorPWM {
             engine?.stop()
-            let engine = HoldEngine(hardware: hardware, clock: clock, floorPWM: ladder.floorPWM, tuning: tuning)
+            let engine = HoldEngine(hardware: keyboard, clock: clock, floorPWM: ladder.floorPWM, tuning: tuning)
             engine.onTuningChange = { [weak self] tuning in
                 self?.tuning = tuning
                 self?.store.set(tuning.holdDuration, forKey: Keys.holdDuration)
@@ -540,20 +540,20 @@ public final class LightController {
 
     /// Auto-brightness and idle dimming would issue their own fades and break a hold.
     private func takeOverSystemFeatures() {
-        guard let hardware else { return }
-        if engine?.phase != .holding { idleLimit = hardware.idleDimTime() }
+        guard let keyboard else { return }
+        if engine?.phase != .holding { idleLimit = keyboard.idleDimTime() }
         if store.object(forKey: Keys.autoBrightnessToRestore) == nil {
-            store.set(hardware.isAutoBrightnessEnabled, forKey: Keys.autoBrightnessToRestore)
+            store.set(keyboard.isAutoBrightnessEnabled, forKey: Keys.autoBrightnessToRestore)
         }
-        hardware.setAutoBrightness(false)
-        hardware.setIdleDimmingSuspended(true)
+        keyboard.setAutoBrightness(false)
+        keyboard.setIdleDimmingSuspended(true)
     }
 
     private func releaseSystemFeatures() {
-        guard let hardware else { return }
-        hardware.setIdleDimmingSuspended(false)
+        guard let keyboard else { return }
+        keyboard.setIdleDimmingSuspended(false)
         if let auto = store.object(forKey: Keys.autoBrightnessToRestore) as? Bool {
-            hardware.setAutoBrightness(auto)
+            keyboard.setAutoBrightness(auto)
             store.removeObject(forKey: Keys.autoBrightnessToRestore)
         }
     }
@@ -573,11 +573,11 @@ public final class LightController {
     }
 
     private func monitor() {
-        guard let hardware, level.isEmber else { return }
+        guard let keyboard, level.isEmber else { return }
         defer { scheduleMonitor() }
         if pause == .sleeping { return }
 
-        if hardware.isLidClosed() {
+        if keyboard.isLidClosed() {
             if pause != .lidClosed { pauseHolding(.lidClosed) }
             return
         }
@@ -593,7 +593,7 @@ public final class LightController {
         pause = reason
         engine?.stop()
         // A gentle fade out, like macOS does for inactivity.
-        hardware?.setBrightness(0, fadeSpeed: reason == .inactive ? 2_000 : 0, commit: false)
+        keyboard?.setBrightness(0, fadeSpeed: reason == .inactive ? 2_000 : 0, commit: false)
     }
 
     private func resumeHolding() {
@@ -635,34 +635,37 @@ public final class LightController {
 
     // MARK: - Step-aside
 
-    /// CoreBrightness reports every target change, including ours. Values other than the two hold
-    /// goals while holding, or a different step otherwise, mean someone else (Control Center,
-    /// another app) changed the keyboard brightness — step aside and follow it.
+    /// CoreBrightness reports every target change, including ours, and a stale echo of a previous
+    /// selection can arrive after we've moved on (the hold engine's 0 after leaving an ember, the
+    /// dimmest step after entering one). So, like the display, the target CoreBrightness holds
+    /// right now is what counts, not the reported value. A target other than the hold goals while
+    /// holding, or a different step otherwise, means someone else (Control Center, another app)
+    /// changed the keyboard brightness — step aside and follow it.
     public func brightnessChanged(to value: Float) {
         trace("brightness notification \(value)")
-        if hardware == nil || isCalibrating { return }
+        guard let keyboard, !isCalibrating else { return }
+        let brightness = keyboard.brightness()
         let floorGoal = HoldEngine.Tuning().floorGoal
         // Hold goals, plus the floor probe's stepping stone.
         let ownGoals: [Float] = [0, floorGoal, floorGoal * 2]
         if level.isEmber {
-            if ownGoals.contains(value) { return }
+            if ownGoals.contains(brightness) { return }
             stopHolding()
             pause = nil
-            level = ladder.nearestLevel(forBrightness: value)
-            store.set(encode(level), forKey: Keys.level)
+            level = ladder.nearestLevel(forBrightness: brightness)
+            store.set(level.storageName, forKey: Keys.level)
             releaseSystemFeatures()
             return
         }
         let current: Float = {
             switch level {
-            case .off: return 0
             case let .system(step): return Level.systemBrightness(step: step)
-            case .ember, .shade: return 0
+            case .off, .ember, .shade: return 0
             }
         }()
-        if abs(value - current) > 0.001 {
-            level = ladder.nearestLevel(forBrightness: value)
-            store.set(encode(level), forKey: Keys.level)
+        if abs(brightness - current) > 0.001 {
+            level = ladder.nearestLevel(forBrightness: brightness)
+            store.set(level.storageName, forKey: Keys.level)
         }
     }
 

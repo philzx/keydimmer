@@ -65,7 +65,7 @@ struct GammaConflictTests {
         #expect(rig.display.isAutoBrightnessEnabled == false)
 
         let next = LightController(
-            hardware: rig.backlight, display: rig.display, clock: rig.clock, store: rig.store,
+            keyboard: rig.backlight, display: rig.display, clock: rig.clock, store: rig.store,
             secondsSinceLastInput: { 0 }, hardwareModel: Rig.model, osBuild: Rig.build
         )
         next.otherGammaAppLaunched(bundleIdentifier: "fyi.lunar.Lunar")
@@ -111,7 +111,7 @@ struct GammaConflictTests {
         let gammaCommands = rig.display.gammaCommands
 
         let next = LightController(
-            hardware: rig.backlight, display: rig.display, clock: rig.clock, store: rig.store,
+            keyboard: rig.backlight, display: rig.display, clock: rig.clock, store: rig.store,
             secondsSinceLastInput: { 0 }, hardwareModel: Rig.model, osBuild: Rig.build
         )
         // The app layer reports what is already running before starting the controller.

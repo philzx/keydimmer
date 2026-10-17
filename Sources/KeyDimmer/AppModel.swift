@@ -141,7 +141,7 @@ final class AppModel {
             unsupportedReason = [keyboardReason, displayReason].compactMap { $0 }.joined(separator: ". ")
         } else {
             controller = LightController(
-                hardware: hardware, display: display, clock: DispatchClock(), store: defaults,
+                keyboard: hardware, display: display, clock: DispatchClock(), store: defaults,
                 secondsSinceLastInput: {
                     CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: CGEventType(rawValue: ~0)!)
                 }

@@ -285,7 +285,7 @@ struct DisplayLightTests {
     @Test func aMacWithoutABuiltInDisplayHasNoDisplayLight() {
         let rig = Rig()
         let controller = LightController(
-            hardware: rig.backlight, clock: rig.clock, store: rig.store, secondsSinceLastInput: { 0 },
+            keyboard: rig.backlight, clock: rig.clock, store: rig.store, secondsSinceLastInput: { 0 },
             hardwareModel: Rig.model, osBuild: Rig.build
         )
         controller.start()

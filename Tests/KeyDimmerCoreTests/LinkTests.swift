@@ -80,6 +80,27 @@ struct LinkTests {
         #expect(controller.level == controller.ladder.ember(12))
     }
 
+    /// Dragging the display across its floor moves the keyboard between the brightest ember and the
+    /// dimmest step in quick succession; the echoes of the previous selection arrive late.
+    @Test func lateKeyboardEchoesWhileTheDisplayCrossesItsFloorLeaveTheLinkedKeyboardWhereTheDisplayPutIt() {
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.isLinked = true
+        controller.select(displayLadder.shade(8)!, on: .display)
+        rig.run(for: 30)
+
+        controller.step(.display, by: 1)
+        controller.brightnessChanged(to: 0)
+        rig.run(for: 1)
+        #expect(controller.level == .system(step: 1))
+
+        controller.step(.display, by: -1)
+        controller.brightnessChanged(to: Level.systemBrightness(step: 1))
+        rig.run(for: 30)
+        #expect(controller.level == controller.ladder.ember(12))
+        #expect(controller.level(of: .display) == displayLadder.shade(8))
+    }
+
     @Test func theLinkIsRememberedAcrossLaunches() {
         let rig = Rig()
         let first = rig.launch()
