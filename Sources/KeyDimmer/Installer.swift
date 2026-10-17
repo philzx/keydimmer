@@ -18,21 +18,41 @@ enum Installer {
 
     static func install(_ release: UpdateChecker.Release) async throws {
         if isHomebrewInstall {
+            // `brew upgrade` only refreshes taps once a day, so it wouldn't see a release made since.
+            try await run(brew, ["update", "--quiet"])
             try await run(brew, ["upgrade", "--cask", "keydimmer"])
         } else {
             try await replaceFromZip(release)
         }
+        // `Bundle` caches Info.plist, so read the replaced file directly.
+        let plist = Bundle.main.bundleURL.appendingPathComponent("Contents/Info.plist")
+        let installed = NSDictionary(contentsOf: plist)?["CFBundleShortVersionString"] as? String
+        guard installed == release.version else {
+            throw Failure("KeyDimmer \(release.version) wasn't installed (found \(installed ?? "nothing")).")
+        }
     }
 
-    /// Waits for this process to exit, opens the (new) app at the same path, then quits.
+    private static let waitFlag = "--replacing"
+
+    /// Opens a second instance of the (new) app at the same path, which waits for this one to quit.
+    /// A helper process wouldn't do: launchd kills an app's children when it exits.
     @MainActor
-    static func relaunch() {
-        let script = "while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done; open \"$0\""
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", script, Bundle.main.bundleURL.path]
-        try? process.run()
-        NSApp.terminate(nil)
+    static func relaunch() async throws {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        configuration.arguments = [waitFlag, String(ProcessInfo.processInfo.processIdentifier)]
+        _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
+    }
+
+    /// In an instance opened by `relaunch()`, blocks until the one it replaces has quit, so the two
+    /// never drive the backlight at once.
+    static func waitForReplacedInstance() {
+        let arguments = CommandLine.arguments
+        guard let flag = arguments.firstIndex(of: waitFlag), flag + 1 < arguments.count,
+              let pid = pid_t(arguments[flag + 1])
+        else { return }
+        let deadline = Date().addingTimeInterval(10)
+        while kill(pid, 0) == 0, Date() < deadline { usleep(100_000) }
     }
 
     // MARK: - From the release zip

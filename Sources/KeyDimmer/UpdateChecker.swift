@@ -93,11 +93,14 @@ final class UpdateChecker {
         }
 
         isInstalling = true
+        let progress = Self.progressPanel("Installing KeyDimmer \(release.version)…")
         Task {
             do {
                 try await Installer.install(release)
-                Installer.relaunch()
+                try await Installer.relaunch()
+                NSApp.terminate(nil)
             } catch {
+                progress.close()
                 isInstalling = false
                 NSApp.activate()
                 let failure = NSAlert()
@@ -108,6 +111,25 @@ final class UpdateChecker {
                 if failure.runModal() == .alertFirstButtonReturn { openReleasePage() }
             }
         }
+    }
+
+    /// A small window that stays up while installing, since the menu (and its "Updating…") is closed.
+    private static func progressPanel(_ message: String) -> NSPanel {
+        let spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.startAnimation(nil)
+        let stack = NSStackView(views: [spinner, NSTextField(labelWithString: message)])
+        stack.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 20, right: 24)
+        let panel = NSPanel(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        panel.title = "KeyDimmer"
+        panel.isReleasedWhenClosed = false
+        panel.level = .floating
+        panel.contentView = stack
+        panel.setContentSize(stack.fittingSize)
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        return panel
     }
 
     private func checkIfDue(force: Bool = false) {
