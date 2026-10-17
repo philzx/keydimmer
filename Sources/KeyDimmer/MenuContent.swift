@@ -33,7 +33,10 @@ struct MenuContent: View {
         }
         .padding(16)
         .frame(width: 320)
-        .onAppear { sliderFocused = true }
+        .onAppear {
+            sliderFocused = true
+            model.refreshLaunchAtLogin()
+        }
     }
 
     private var header: some View {
@@ -76,12 +79,45 @@ struct MenuContent: View {
 
     private var settings: some View {
         VStack(alignment: .leading, spacing: 8) {
-            settingRow("Launch at login", isOn: Binding(
-                get: { _ = model.launchAtLoginRevision; return model.launchAtLogin },
-                set: { model.launchAtLogin = $0 }
-            ))
-            settingRow("Global shortcuts", detail: "⌃⌥↑ ⌃⌥↓", isOn: $model.hotkeysEnabled)
+            settingRow("Launch at login", isOn: $model.launchAtLogin)
+            if model.launchAtLoginNeedsApproval {
+                notice("Waiting for your approval in System Settings.", action: "Open Login Items") {
+                    model.openLoginItemsSettings()
+                }
+            } else if let error = model.launchAtLoginError {
+                notice("Couldn't change: \(error)")
+            }
+            HStack {
+                Text("Global shortcuts")
+                Picker("Shortcut modifiers", selection: $model.hotkeyModifiers) {
+                    ForEach(HotKeys.Modifiers.allCases) { Text("\($0.symbols)↑ \($0.symbols)↓").tag($0) }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+                .controlSize(.small)
+                .disabled(!model.hotkeysEnabled)
+                Spacer()
+                switchToggle("Global shortcuts", isOn: $model.hotkeysEnabled)
+            }
+            if model.hotkeysEnabled, model.hotkeysUnavailable {
+                notice("\(model.hotkeyModifiers.symbols)↑/↓ are taken by another app. Choose other keys.")
+            }
             settingRow("Turn off with macOS inactivity timer", isOn: $model.followsInactivity)
+            if model.isSupported {
+                HStack {
+                    Text("macOS floor")
+                    Text(model.calibrationFailed ? "measuring failed" : model.floorDescription ?? "not measured")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Recalibrate") { model.recalibrate() }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        .disabled(model.isCalibrating)
+                        .help("Measure the dimmest level macOS allows on this Mac again")
+                }
+            }
             settingRow("Check for updates", isOn: Binding(
                 get: { model.updates.isEnabled },
                 set: { model.updates.isEnabled = $0 }
@@ -96,11 +132,28 @@ struct MenuContent: View {
                 Text(detail).font(.caption.monospaced()).foregroundStyle(.secondary)
             }
             Spacer()
-            Toggle(title, isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
+            switchToggle(title, isOn: isOn)
         }
+    }
+
+    private func switchToggle(_ title: String, isOn: Binding<Bool>) -> some View {
+        Toggle(title, isOn: isOn)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+    }
+
+    private func notice(_ text: String, action: String? = nil, perform: @escaping () -> Void = {}) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Label(text, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            if let action {
+                Spacer(minLength: 4)
+                Button(action, action: perform).buttonStyle(.link)
+            }
+        }
+        .font(.caption)
     }
 
     private var footer: some View {
