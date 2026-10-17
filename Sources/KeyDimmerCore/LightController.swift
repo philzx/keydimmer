@@ -41,7 +41,12 @@ public final class LightController {
     /// The built-in display's ladder: shades, then macOS's steps. Nil without a display to drive.
     public let displayLadder: Ladder?
     /// The built-in display's level. Nil without a display to drive.
-    public private(set) var displayLevel: Level?
+    ///
+    /// Every change of the display's level, whoever causes it, passes through here, so this is
+    /// where the Link makes the keyboard follow. The first reading at launch isn't a change.
+    public private(set) var displayLevel: Level? {
+        didSet { if oldValue != nil, displayLevel != oldValue { followDisplay() } }
+    }
     public private(set) var pause: Pause?
     public private(set) var stats = HoldEngine.Stats()
     public private(set) var isCalibrating = false
@@ -53,6 +58,15 @@ public final class LightController {
     /// Whether an ember turns off after macOS's keyboard inactivity timeout, as macOS's own levels do.
     public var followsInactivity: Bool {
         didSet { store.set(followsInactivity, forKey: Keys.followsInactivity) }
+    }
+
+    /// The Link: the keyboard follows the built-in display. Turning it on moves the keyboard to the
+    /// display's matching level once; adjusting the keyboard by hand afterwards doesn't unlink.
+    public var isLinked: Bool {
+        didSet {
+            store.set(isLinked, forKey: Keys.isLinked)
+            if isLinked, !oldValue { followDisplay() }
+        }
     }
 
     /// Diagnostics trace (KEYDIMMER_TRACE in the app).
@@ -67,6 +81,7 @@ public final class LightController {
         static let holdDuration = "holdDuration"
         static let autoBrightnessToRestore = "autoBrightnessToRestore"
         static let displayLevel = "displayLevel"
+        static let isLinked = "isLinked"
     }
 
     @ObservationIgnored private let hardware: BacklightHardware
@@ -109,6 +124,7 @@ public final class LightController {
         floorBuildKey = floorKey + ".osBuild"
         self.osBuild = osBuild
         followsInactivity = store.object(forKey: Keys.followsInactivity) as? Bool ?? true
+        isLinked = store.object(forKey: Keys.isLinked) as? Bool ?? false
         if let duration = store.object(forKey: Keys.holdDuration) as? Double { tuning.holdDuration = duration }
         // Placeholder so `cachedFloor()` can run; replaced on the next line.
         ladder = Ladder(floorPWM: 54)
@@ -273,6 +289,32 @@ public final class LightController {
         guard displayIsShaded else { return }
         display?.restoreGamma()
         displayIsShaded = false
+    }
+
+    // MARK: - Link
+
+    /// Under the Link, puts the keyboard on the level matching the display's.
+    private func followDisplay() {
+        guard isLinked, let displayLevel, let target = linkedKeyboardLevel(for: displayLevel) else { return }
+        if target != level { select(target) }
+    }
+
+    /// The keyboard level the Link pairs with a display level. Shades map onto embers and system
+    /// steps onto the same system step; within each zone the position is proportional, so the
+    /// dimmest and brightest shades land on the dimmest and brightest embers.
+    private func linkedKeyboardLevel(for displayLevel: Level) -> Level? {
+        switch displayLevel {
+        case let .shade(index, _):
+            let shadeCount = displayLadder?.levels.filter(\.isShade).count ?? 0
+            let emberCount = ladder.levels.filter(\.isEmber).count
+            guard shadeCount > 0, emberCount > 0 else { return nil }
+            let fraction = shadeCount > 1 ? Double(index - 1) / Double(shadeCount - 1) : 1
+            return ladder.ember(1 + Int((fraction * Double(emberCount - 1)).rounded()))
+        case let .system(step):
+            return .system(step: step)
+        case .off, .ember:
+            return nil
+        }
     }
 
     // MARK: - Floor

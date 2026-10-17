@@ -132,6 +132,9 @@ struct MenuContent: View {
                 notice("\(model.hotkeyModifiers.symbols)↑/↓ are taken by another app. Choose other keys.")
             }
             settingRow("Turn off with macOS inactivity timer", isOn: $model.followsInactivity)
+            if model.displayLadder != nil {
+                settingRow("Keyboard follows display", isOn: $model.isLinked)
+            }
             if model.isSupported {
                 HStack {
                     Text("macOS floor")

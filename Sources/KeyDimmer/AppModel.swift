@@ -57,6 +57,12 @@ final class AppModel {
         set { controller?.followsInactivity = newValue }
     }
 
+    /// The Link: the keyboard follows the built-in display.
+    var isLinked: Bool {
+        get { controller?.isLinked ?? false }
+        set { controller?.isLinked = newValue }
+    }
+
     /// On once registered, including while macOS waits for the user to approve it.
     var launchAtLogin: Bool {
         get { _ = launchAtLoginRevision; return [.enabled, .requiresApproval].contains(SMAppService.mainApp.status) }
