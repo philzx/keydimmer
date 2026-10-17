@@ -141,6 +141,9 @@ struct MenuContent: View {
             if model.hotkeysEnabled, let taken = takenShortcuts {
                 notice("\(taken) taken by another app. Choose other keys.")
             }
+            if model.hasKeyboard, model.hasDisplay {
+                settingRow("Keyboard follows display", isOn: $model.isLinked)
+            }
             if model.hasKeyboard {
                 settingRow("Turn off with macOS inactivity timer", isOn: $model.followsInactivity)
                 HStack {
