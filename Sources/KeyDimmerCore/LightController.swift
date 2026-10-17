@@ -10,11 +10,21 @@ public protocol SettingsStore: AnyObject {
 
 extension UserDefaults: SettingsStore {}
 
-/// Owns the keyboard light, its ladder and every rule about it.
+/// One of the lights KeyDimmer dims.
+public enum Light: Hashable, Sendable, CaseIterable {
+    case keyboard
+    /// The built-in display.
+    case display
+}
+
+/// Owns every light (the keyboard and the built-in display), their ladders and every rule about them.
 ///
 /// It takes commands (select a level, step), receives events (macOS changed the brightness, will
 /// sleep, did wake, will quit) and publishes the state the menu renders. It watches the lid and
 /// the user's inactivity itself while holding an ember. Everything runs on the clock's queue.
+///
+/// The keyboard-only members (`ladder`, `level`, `select(_:)`, `step(by:)`, …) predate the display
+/// and are shorthands for `.keyboard`.
 @Observable
 public final class LightController {
     public enum Pause: Equatable, Sendable {
@@ -23,8 +33,15 @@ public final class LightController {
         case inactive
     }
 
+    /// The keyboard's ladder.
     public private(set) var ladder: Ladder
+    /// The keyboard's level.
     public private(set) var level: Level = .off
+
+    /// The built-in display's ladder: shades, then macOS's steps. Nil without a display to drive.
+    public let displayLadder: Ladder?
+    /// The built-in display's level. Nil without a display to drive.
+    public private(set) var displayLevel: Level?
     public private(set) var pause: Pause?
     public private(set) var stats = HoldEngine.Stats()
     public private(set) var isCalibrating = false
@@ -49,9 +66,13 @@ public final class LightController {
         static let followsInactivity = "followsInactivity"
         static let holdDuration = "holdDuration"
         static let autoBrightnessToRestore = "autoBrightnessToRestore"
+        static let displayLevel = "displayLevel"
     }
 
     @ObservationIgnored private let hardware: BacklightHardware
+    @ObservationIgnored private let display: DisplayHardware?
+    /// Whether the display's gamma table is one of our shades.
+    @ObservationIgnored private var displayIsShaded = false
     @ObservationIgnored private let clock: EngineClock
     @ObservationIgnored private let store: SettingsStore
     @ObservationIgnored private let secondsSinceLastInput: () -> TimeInterval
@@ -69,14 +90,18 @@ public final class LightController {
     @ObservationIgnored private var idleLimit: TimeInterval = 0
 
     /// - Parameters:
+    ///   - hardware: the keyboard backlight.
+    ///   - display: the built-in display, or nil if this Mac has none KeyDimmer can drive.
     ///   - secondsSinceLastInput: time since the user last touched any input device.
     ///   - hardwareModel, osBuild: identify this Mac and macOS build for the floor cache.
     public init(
-        hardware: BacklightHardware, clock: EngineClock, store: SettingsStore,
+        hardware: BacklightHardware, display: DisplayHardware? = nil, clock: EngineClock, store: SettingsStore,
         secondsSinceLastInput: @escaping () -> TimeInterval,
         hardwareModel: String = FloorProbe.hardwareModel, osBuild: String = FloorProbe.osBuild
     ) {
         self.hardware = hardware
+        self.display = display
+        displayLadder = display.map { _ in Ladder.display() }
         self.clock = clock
         self.store = store
         self.secondsSinceLastInput = secondsSinceLastInput
@@ -103,6 +128,7 @@ public final class LightController {
         } else {
             level = ladder.nearestLevel(forBrightness: hardware.brightness())
         }
+        startDisplay()
     }
 
     /// Leaves the keyboard as dim as macOS can keep it without us, and hands features back.
@@ -112,17 +138,49 @@ public final class LightController {
             hardware.setBrightness(HoldEngine.Tuning().floorGoal, fadeSpeed: 350, commit: true)
         }
         releaseSystemFeatures()
+        quitDisplay()
     }
 
     // MARK: - Selection
 
-    public func select(index: Int) { select(ladder.level(at: index)) }
+    /// The light's ladder; nil if this Mac doesn't have the light.
+    public func ladder(of light: Light) -> Ladder? {
+        switch light {
+        case .keyboard: return ladder
+        case .display: return displayLadder
+        }
+    }
+
+    /// The light's current level; nil if this Mac doesn't have the light.
+    public func level(of light: Light) -> Level? {
+        switch light {
+        case .keyboard: return level
+        case .display: return displayLevel
+        }
+    }
+
+    public func select(_ level: Level, on light: Light) {
+        switch light {
+        case .keyboard: select(level)
+        case .display: selectDisplay(level)
+        }
+    }
+
+    public func select(index: Int, on light: Light) {
+        guard let ladder = ladder(of: light) else { return }
+        select(ladder.level(at: index), on: light)
+    }
 
     /// Does nothing at either end, where a held shortcut keeps repeating.
-    public func step(by delta: Int) {
-        let index = min(max(levelIndex + delta, 0), ladder.count - 1)
-        if index != levelIndex { select(index: index) }
+    public func step(_ light: Light, by delta: Int) {
+        guard let ladder = ladder(of: light), let current = level(of: light).flatMap(ladder.index(of:)) else { return }
+        let index = min(max(current + delta, 0), ladder.count - 1)
+        if index != current { select(index: index, on: light) }
     }
+
+    public func select(index: Int) { select(index: index, on: .keyboard) }
+
+    public func step(by delta: Int) { step(.keyboard, by: delta) }
 
     public func select(_ newLevel: Level) {
         // A probe in flight owns the backlight; it re-selects the level when it finishes.
@@ -153,6 +211,68 @@ public final class LightController {
         case .shade:
             break // The keyboard has no shades (guarded above).
         }
+    }
+
+    // MARK: - Display
+
+    /// The display's floor: the dimmest macOS step. Shades are applied on top of it.
+    private static let displayFloor = Level.systemBrightness(step: 1)
+
+    /// Returns to the saved shade (macOS restored the picture when the last run ended), or shows
+    /// the step macOS is at.
+    private func startDisplay() {
+        guard let display, let displayLadder else { return }
+        let saved = (store.object(forKey: Keys.displayLevel) as? String).flatMap(displayLadder.level(named:))
+        if let saved, saved.isShade {
+            selectDisplay(saved)
+        } else {
+            displayLevel = displayLadder.nearestLevel(forBrightness: display.brightness())
+        }
+    }
+
+    /// Leaves the display as dim as macOS can keep it without us: the floor, with the picture back.
+    private func quitDisplay() {
+        guard displayLevel?.isShade == true else { return }
+        restoreDisplayGamma()
+        setDisplayBrightness(Self.displayFloor)
+    }
+
+    private func selectDisplay(_ newLevel: Level) {
+        guard let displayLadder, displayLadder.index(of: newLevel) != nil else { return }
+        trace("select display \(newLevel.title)")
+        displayLevel = newLevel
+        store.set(newLevel.storageName, forKey: Keys.displayLevel)
+        applyDisplay(newLevel)
+    }
+
+    /// Drives the display to a level: a shade is the floor with the picture darkened, a system step
+    /// is macOS's own brightness with the picture as ColorSync wants it.
+    private func applyDisplay(_ level: Level) {
+        switch level {
+        case let .shade(_, factor):
+            setDisplayBrightness(Self.displayFloor)
+            display?.setGamma(factor: factor)
+            displayIsShaded = true
+        case let .system(step):
+            restoreDisplayGamma()
+            setDisplayBrightness(Level.systemBrightness(step: step))
+        case .off, .ember:
+            break // Not on the display's ladder.
+        }
+    }
+
+    /// Only commands a change, so moving between shades leaves the backlight alone.
+    private func setDisplayBrightness(_ value: Float) {
+        guard let display, display.brightness() != value else { return }
+        display.setBrightness(value)
+    }
+
+    /// Only touches the gamma if a shade of ours is applied: any other table (ColorSync's, or
+    /// another app's) is left as it is.
+    private func restoreDisplayGamma() {
+        guard displayIsShaded else { return }
+        display?.restoreGamma()
+        displayIsShaded = false
     }
 
     // MARK: - Floor

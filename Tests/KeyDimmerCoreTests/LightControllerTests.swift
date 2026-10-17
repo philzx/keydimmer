@@ -11,14 +11,16 @@ final class MemoryStore: SettingsStore {
     func removeObject(forKey key: String) { values[key] = nil }
 }
 
-/// A Mac under test: the simulated keyboard, the fake clock and the user's input, with the
-/// controller wired the way the app wires it (brightness notifications arrive asynchronously).
+/// A Mac under test: the simulated keyboard and built-in display, the fake clock and the user's
+/// input, with the controller wired the way the app wires it (brightness notifications arrive
+/// asynchronously).
 final class Rig {
     static let model = "Mac15,13"
     static let build = "25A354"
 
     let clock = FakeClock()
     let backlight: SimulatedBacklight
+    let display = SimulatedDisplay()
     let store = MemoryStore()
     var secondsIdle: TimeInterval = 0
 
@@ -35,7 +37,7 @@ final class Rig {
     /// Launches KeyDimmer.
     func launch() -> LightController {
         let controller = LightController(
-            hardware: backlight, clock: clock, store: store,
+            hardware: backlight, display: display, clock: clock, store: store,
             secondsSinceLastInput: { [unowned self] in self.secondsIdle },
             hardwareModel: Self.model, osBuild: Self.build
         )
