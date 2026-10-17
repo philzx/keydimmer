@@ -123,7 +123,7 @@ struct MenuContent: View {
             HStack {
                 Text("Global shortcuts")
                 Picker("Shortcut modifiers", selection: $model.hotkeyModifiers) {
-                    ForEach(HotKeys.Modifiers.allCases) { Text("\($0.symbols)↑ \($0.symbols)↓").tag($0) }
+                    ForEach(HotKeys.Modifiers.allCases) { Text(shortcutsTitle($0)).tag($0) }
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
@@ -133,8 +133,8 @@ struct MenuContent: View {
                 Spacer()
                 switchToggle("Global shortcuts", isOn: $model.hotkeysEnabled)
             }
-            if model.hotkeysEnabled, model.hotkeysUnavailable {
-                notice("\(model.hotkeyModifiers.symbols)↑/↓ are taken by another app. Choose other keys.")
+            if model.hotkeysEnabled, let taken = takenShortcuts {
+                notice("\(taken) taken by another app. Choose other keys.")
             }
             if model.hasKeyboard {
                 settingRow("Turn off with macOS inactivity timer", isOn: $model.followsInactivity)
@@ -170,12 +170,31 @@ struct MenuContent: View {
         }
     }
 
+    /// The shortcuts macOS refused, e.g. "⌃⌥↑/↓ are" or "⌃⌥↑/↓ and ⌃⌥⇧↑/↓ are".
+    private var takenShortcuts: String? {
+        let symbols = model.hotkeyModifiers.symbols
+        let keys = [Light.keyboard, .display].filter(model.unavailableShortcuts.contains).map {
+            $0 == .display ? "\(symbols)⇧↑/↓" : "\(symbols)↑/↓"
+        }
+        return keys.isEmpty ? nil : keys.joined(separator: " and ") + " are"
+    }
+
     private var updateCheckDescription: String? {
         if model.updates.isChecking { return "checking…" }
         switch model.updates.checkResult {
         case .upToDate?: return "up to date"
         case .failed?: return "check failed"
         case nil: return nil
+        }
+    }
+
+    /// The keyboard's arrows, plus a reminder of the display's ⇧; only for the lights this Mac has.
+    private func shortcutsTitle(_ modifiers: HotKeys.Modifiers) -> String {
+        let symbols = modifiers.symbols
+        switch (model.hasKeyboard, model.hasDisplay) {
+        case (true, true): return "\(symbols)↑ \(symbols)↓ (+⇧ display)"
+        case (false, true): return "\(symbols)⇧↑ \(symbols)⇧↓"
+        default: return "\(symbols)↑ \(symbols)↓"
         }
     }
 
