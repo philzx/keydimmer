@@ -1,8 +1,8 @@
 import AppKit
 import Observation
 
-/// Asks GitHub once a day whether a newer release exists, and installs it on request. The only
-/// network access KeyDimmer makes.
+/// Asks GitHub once a day (or on demand) whether a newer release exists, and installs it on
+/// request. The only network access KeyDimmer makes.
 @MainActor
 @Observable
 final class UpdateChecker {
@@ -13,8 +13,13 @@ final class UpdateChecker {
         let checksums: URL
     }
 
+    enum CheckResult { case upToDate, failed }
+
     private(set) var available: Release?
     private(set) var isInstalling = false
+    private(set) var isChecking = false
+    /// Outcome of the last manual check, when it found nothing to install.
+    private(set) var checkResult: CheckResult?
 
     var isEnabled: Bool {
         didSet {
@@ -45,6 +50,23 @@ final class UpdateChecker {
         checkIfDue(force: true)
         timer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { _ in
             MainActor.assumeIsolated { [weak self] in self?.checkIfDue() }
+        }
+    }
+
+    /// Unbundled builds (`swift run`) have no version to compare.
+    var canCheck: Bool { current != nil }
+
+    /// Checks right away, even with automatic checks off, and reports the outcome.
+    func checkNow() {
+        guard let current, !isChecking else { return }
+        defaults.set(Date(), forKey: Keys.lastCheck)
+        isChecking = true
+        checkResult = nil
+        Task {
+            let release = await Self.fetchLatest()
+            isChecking = false
+            guard let release else { checkResult = .failed; return }
+            if Self.isNewer(release.version, than: current) { available = release } else { checkResult = .upToDate }
         }
     }
 
