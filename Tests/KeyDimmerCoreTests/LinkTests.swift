@@ -105,4 +105,18 @@ struct LinkTests {
         #expect(rig.store.object(forKey: "isLinked") == nil)
         #expect(rig.backlight.commands == commands)
     }
+
+    @Test func whenTheDisplayStepsAsideFromAShadeTheLinkedKeyboardFollowsItToTheSystemStep() {
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.isLinked = true
+        controller.select(displayLadder.shade(3)!, on: .display)
+        rig.run(for: 2)
+
+        rig.display.externalChange(to: 0.3)
+        rig.run(for: 2)
+
+        #expect(controller.level(of: .display) == .system(step: 5))
+        #expect(controller.level == .system(step: 5))
+    }
 }
