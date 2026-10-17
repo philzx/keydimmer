@@ -67,6 +67,9 @@ public final class LightController {
         static let holdDuration = "holdDuration"
         static let autoBrightnessToRestore = "autoBrightnessToRestore"
         static let displayLevel = "displayLevel"
+        /// The display's automatic brightness as found before the first shade; present only while
+        /// on shades, so a crash on a shade leaves it for the next launch to hand back.
+        static let displayAutoBrightnessToRestore = "displayAutoBrightnessToRestore"
     }
 
     @ObservationIgnored private let hardware: BacklightHardware
@@ -222,7 +225,12 @@ public final class LightController {
     /// the step macOS is at.
     private func startDisplay() {
         guard let display, let displayLadder else { return }
+        display.observeBrightness { [weak self, clock] _ in
+            _ = clock.after(0) { self?.displayBrightnessChanged() }
+        }
         let saved = (store.object(forKey: Keys.displayLevel) as? String).flatMap(displayLadder.level(named:))
+        // A crash on a shade left automatic brightness paused, unless we're returning to a shade.
+        if saved?.isShade != true { releaseDisplayAutoBrightness() }
         if let saved, saved.isShade {
             selectDisplay(saved)
         } else {
@@ -235,6 +243,7 @@ public final class LightController {
         guard displayLevel?.isShade == true else { return }
         restoreDisplayGamma()
         setDisplayBrightness(Self.displayFloor)
+        releaseDisplayAutoBrightness()
     }
 
     private func selectDisplay(_ newLevel: Level) {
@@ -250,12 +259,15 @@ public final class LightController {
     private func applyDisplay(_ level: Level) {
         switch level {
         case let .shade(_, factor):
+            // Automatic brightness would move the backlight off the floor under the shade.
+            takeOverDisplayAutoBrightness()
             setDisplayBrightness(Self.displayFloor)
             display?.setGamma(factor: factor)
             displayIsShaded = true
         case let .system(step):
             restoreDisplayGamma()
             setDisplayBrightness(Level.systemBrightness(step: step))
+            releaseDisplayAutoBrightness()
         case .off, .ember:
             break // Not on the display's ladder.
         }
@@ -273,6 +285,42 @@ public final class LightController {
         guard displayIsShaded else { return }
         display?.restoreGamma()
         displayIsShaded = false
+    }
+
+    /// macOS reports every brightness change, possibly including our own sets, and a stale echo
+    /// can arrive after we've moved on, so the display's brightness right now is what counts, not
+    /// the reported value. On a shade, anything but the floor means someone else (the brightness
+    /// keys, Control Center, another app) took over: step aside and follow them. On a system step,
+    /// the slider just follows.
+    private func displayBrightnessChanged() {
+        guard let display, let displayLadder, let displayLevel else { return }
+        let brightness = display.brightness()
+        trace("display brightness notification \(brightness)")
+        let level = displayLadder.nearestLevel(forBrightness: brightness)
+        if displayLevel.isShade {
+            guard abs(brightness - Self.displayFloor) > 0.001 else { return }
+            restoreDisplayGamma()
+            releaseDisplayAutoBrightness()
+        } else if level == displayLevel {
+            return
+        }
+        self.displayLevel = level
+        store.set(level.storageName, forKey: Keys.displayLevel)
+    }
+
+    /// Remembers automatic brightness as first found, so moving between shades keeps the original.
+    private func takeOverDisplayAutoBrightness() {
+        guard let display else { return }
+        if store.object(forKey: Keys.displayAutoBrightnessToRestore) == nil {
+            store.set(display.isAutoBrightnessEnabled, forKey: Keys.displayAutoBrightnessToRestore)
+        }
+        display.setAutoBrightness(false)
+    }
+
+    private func releaseDisplayAutoBrightness() {
+        guard let display, let auto = store.object(forKey: Keys.displayAutoBrightnessToRestore) as? Bool else { return }
+        display.setAutoBrightness(auto)
+        store.removeObject(forKey: Keys.displayAutoBrightnessToRestore)
     }
 
     // MARK: - Floor
