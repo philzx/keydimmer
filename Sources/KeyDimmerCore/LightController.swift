@@ -87,6 +87,9 @@ public final class LightController {
     @ObservationIgnored private let display: DisplayHardware?
     /// Whether the display's gamma table is one of our shades.
     @ObservationIgnored private var displayIsShaded = false
+    /// The shade taken off for sleep, to put back on wake.
+    @ObservationIgnored private var displaySleepingShade: Level?
+    @ObservationIgnored private var displayWake: Cancellable?
     @ObservationIgnored private let clock: EngineClock
     @ObservationIgnored private let store: SettingsStore
     @ObservationIgnored private let secondsSinceLastInput: () -> TimeInterval
@@ -299,6 +302,30 @@ public final class LightController {
         displayIsShaded = false
     }
 
+    /// Takes the shade off for sleep, remembering it so waking can put it back.
+    private func sleepDisplay() {
+        displayWake?.cancel()
+        displayWake = nil
+        guard let displayLevel, displayLevel.isShade else { return }
+        trace("sleep display")
+        restoreDisplayGamma()
+        displaySleepingShade = displayLevel
+    }
+
+    /// Puts the shade back after the wake grace, unless the level changed in the meantime.
+    private func wakeDisplay() {
+        guard displaySleepingShade != nil else { return }
+        displayWake?.cancel()
+        displayWake = clock.after(Self.wakeGrace) { [weak self] in
+            guard let self, let shade = self.displaySleepingShade else { return }
+            self.displaySleepingShade = nil
+            self.displayWake = nil
+            guard self.displayLevel == shade else { return }
+            self.trace("wake display")
+            self.applyDisplay(shade)
+        }
+    }
+
     // MARK: - Floor
 
     /// The measured floor, unless it was taken on another macOS build.
@@ -446,17 +473,23 @@ public final class LightController {
         if case let .ember(_, pwm) = level { startHolding(pwm: pwm) }
     }
 
-    /// The Mac or its displays are going to sleep.
+    /// How long after waking the lights wait before returning to their levels, giving
+    /// CoreBrightness (and the display's own restore) a moment to settle first.
+    private static let wakeGrace: TimeInterval = 1
+
+    /// The Mac or its displays are going to sleep. Locking the screen is not sleep: a shade stays.
     public func willSleep() {
+        sleepDisplay()
         guard level.isEmber else { return }
         pauseHolding(.sleeping)
     }
 
     /// The Mac or its displays woke up.
     public func didWake() {
+        wakeDisplay()
         guard level.isEmber else { return }
         // Give CoreBrightness a moment to restore its own state first.
-        _ = clock.after(1) { [weak self] in
+        _ = clock.after(Self.wakeGrace) { [weak self] in
             guard let self, self.pause == .sleeping else { return }
             self.resumeHolding()
         }
