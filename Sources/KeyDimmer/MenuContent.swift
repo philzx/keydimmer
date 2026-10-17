@@ -88,6 +88,11 @@ struct MenuContent: View {
             .focused($focusedSlider, equals: .display)
             .onKeyPress(keys: [.leftArrow, .downArrow]) { _ in model.stepDisplay(by: -1); return .handled }
             .onKeyPress(keys: [.rightArrow, .upArrow]) { _ in model.stepDisplay(by: 1); return .handled }
+            if let reason = model.shadesUnavailableReason {
+                Label("Shades are off while \(reason)", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

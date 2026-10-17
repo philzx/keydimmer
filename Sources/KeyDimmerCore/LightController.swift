@@ -45,6 +45,8 @@ public final class LightController {
     public let displayLadder: Ladder?
     /// The built-in display's level. Nil without a display to drive.
     public private(set) var displayLevel: Level?
+    /// Why the display's shades can't be selected right now (another gamma app is running), or nil.
+    public private(set) var shadesUnavailableReason: String?
     public private(set) var pause: Pause?
     public private(set) var stats = HoldEngine.Stats()
     public private(set) var isCalibrating = false
@@ -90,6 +92,8 @@ public final class LightController {
     @ObservationIgnored private let display: DisplayHardware?
     /// Whether the display's gamma table is one of our shades.
     @ObservationIgnored private var displayIsShaded = false
+    /// Bundle identifiers of the other gamma apps running, oldest first; one entry per instance.
+    @ObservationIgnored private var runningGammaApps: [String] = []
     /// The shade taken off for sleep, to put back on wake.
     @ObservationIgnored private var displaySleepingShade: Level?
     @ObservationIgnored private var displayWake: Cancellable?
@@ -259,7 +263,8 @@ public final class LightController {
         // A crash on a shade left automatic brightness paused, unless we're returning to a shade.
         if saved?.isShade != true { releaseDisplayAutoBrightness() }
         if let saved, saved.isShade {
-            selectDisplay(saved)
+            // Another gamma app is already running: the shade stands down to the floor, as it would have.
+            selectDisplay(shadesUnavailableReason == nil ? saved : .system(step: 1))
         } else {
             displayLevel = displayLadder.nearestLevel(forBrightness: display.brightness())
         }
@@ -274,7 +279,8 @@ public final class LightController {
     }
 
     private func selectDisplay(_ newLevel: Level) {
-        guard let displayLadder, displayLadder.index(of: newLevel) != nil else { return }
+        guard let displayLadder, displayLadder.index(of: newLevel) != nil,
+              !(newLevel.isShade && shadesUnavailableReason != nil) else { return }
         trace("select display \(newLevel.title)")
         displayLevel = newLevel
         store.set(newLevel.storageName, forKey: Keys.displayLevel)
@@ -372,6 +378,32 @@ public final class LightController {
             self.trace("wake display")
             self.applyDisplay(shade)
         }
+    }
+
+    // MARK: - Conflicting gamma apps
+
+    /// Another gamma app (`GammaApps`) was launched, or was running when KeyDimmer started. Any
+    /// shade is removed, leaving the display at its floor, and shades stay unavailable until it quits.
+    public func otherGammaAppLaunched(bundleIdentifier: String) {
+        guard GammaApps.name(forBundleIdentifier: bundleIdentifier) != nil else { return }
+        trace("gamma app launched \(bundleIdentifier)")
+        runningGammaApps.append(bundleIdentifier)
+        updateShadesUnavailableReason()
+        if displayLevel?.isShade == true { selectDisplay(.system(step: 1)) }
+    }
+
+    /// A gamma app quit. Once none is left, shades can be selected again; the display stays where it is.
+    public func otherGammaAppQuit(bundleIdentifier: String) {
+        guard let index = runningGammaApps.firstIndex(of: bundleIdentifier) else { return }
+        trace("gamma app quit \(bundleIdentifier)")
+        runningGammaApps.remove(at: index)
+        updateShadesUnavailableReason()
+    }
+
+    private func updateShadesUnavailableReason() {
+        shadesUnavailableReason = runningGammaApps.first
+            .flatMap(GammaApps.name(forBundleIdentifier:))
+            .map { "\($0) is running" }
     }
 
     // MARK: - Floor
