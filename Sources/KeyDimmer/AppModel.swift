@@ -37,7 +37,7 @@ final class AppModel {
         didSet {
             defaults.set(hotkeysEnabled, forKey: Keys.hotkeys)
             hotKeys.isEnabled = hotkeysEnabled
-            hotkeysUnavailable = hotKeys.registrationFailed
+            unavailableShortcuts = hotKeys.failedLights
         }
     }
 
@@ -45,12 +45,12 @@ final class AppModel {
         didSet {
             defaults.set(hotkeyModifiers.rawValue, forKey: Keys.hotkeyModifiers)
             hotKeys.modifiers = hotkeyModifiers
-            hotkeysUnavailable = hotKeys.registrationFailed
+            unavailableShortcuts = hotKeys.failedLights
         }
     }
 
-    /// The shortcuts are on but macOS wouldn't register them (another app has the same keys).
-    private(set) var hotkeysUnavailable = false
+    /// The lights whose shortcuts are on but macOS wouldn't register (another app has the same keys).
+    private(set) var unavailableShortcuts: Set<Light> = []
 
     var followsInactivity: Bool {
         get { controller?.followsInactivity ?? true }
@@ -159,10 +159,11 @@ final class AppModel {
         hardware.observeBrightness { [weak controller] value in
             DispatchQueue.main.async { controller?.brightnessChanged(to: value) }
         }
-        hotKeys.onStep = { [weak self] delta in self?.step(by: delta) }
+        hotKeys.onStep = { [weak controller] light, delta in controller?.step(light, by: delta) }
+        hotKeys.lights = controller.displayLadder == nil ? [.keyboard] : [.keyboard, .display]
         hotKeys.modifiers = hotkeyModifiers
         hotKeys.isEnabled = hotkeysEnabled
-        hotkeysUnavailable = hotKeys.registrationFailed
+        unavailableShortcuts = hotKeys.failedLights
         power = PowerObserver { [weak controller] event in
             switch event {
             case .willSleep: controller?.willSleep()

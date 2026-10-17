@@ -118,7 +118,7 @@ struct MenuContent: View {
             HStack {
                 Text("Global shortcuts")
                 Picker("Shortcut modifiers", selection: $model.hotkeyModifiers) {
-                    ForEach(HotKeys.Modifiers.allCases) { Text("\($0.symbols)↑ \($0.symbols)↓").tag($0) }
+                    ForEach(HotKeys.Modifiers.allCases) { Text(shortcutsTitle($0)).tag($0) }
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
@@ -128,8 +128,8 @@ struct MenuContent: View {
                 Spacer()
                 switchToggle("Global shortcuts", isOn: $model.hotkeysEnabled)
             }
-            if model.hotkeysEnabled, model.hotkeysUnavailable {
-                notice("\(model.hotkeyModifiers.symbols)↑/↓ are taken by another app. Choose other keys.")
+            if model.hotkeysEnabled, let taken = takenShortcuts {
+                notice("\(taken) taken by another app. Choose other keys.")
             }
             settingRow("Turn off with macOS inactivity timer", isOn: $model.followsInactivity)
             if model.isSupported {
@@ -165,6 +165,15 @@ struct MenuContent: View {
         }
     }
 
+    /// The shortcuts macOS refused, e.g. "⌃⌥↑/↓ are" or "⌃⌥↑/↓ and ⌃⌥⇧↑/↓ are".
+    private var takenShortcuts: String? {
+        let symbols = model.hotkeyModifiers.symbols
+        let keys = [Light.keyboard, .display].filter(model.unavailableShortcuts.contains).map {
+            $0 == .display ? "\(symbols)⇧↑/↓" : "\(symbols)↑/↓"
+        }
+        return keys.isEmpty ? nil : keys.joined(separator: " and ") + " are"
+    }
+
     private var updateCheckDescription: String? {
         if model.updates.isChecking { return "checking…" }
         switch model.updates.checkResult {
@@ -172,6 +181,12 @@ struct MenuContent: View {
         case .failed?: return "check failed"
         case nil: return nil
         }
+    }
+
+    /// The keyboard's arrows, plus a reminder of the display's ⇧ when there is a display light.
+    private func shortcutsTitle(_ modifiers: HotKeys.Modifiers) -> String {
+        let keyboard = "\(modifiers.symbols)↑ \(modifiers.symbols)↓"
+        return model.displayLadder == nil ? keyboard : keyboard + " (+⇧ display)"
     }
 
     private func settingRow(_ title: String, detail: String? = nil, isOn: Binding<Bool>) -> some View {
