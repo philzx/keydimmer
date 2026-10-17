@@ -32,11 +32,17 @@ public enum FloorProbe {
 
     public static func cacheKey(model: String) -> String { "floorPWM.\(model)" }
 
-    public static var hardwareModel: String {
+    public static var hardwareModel: String { sysctlString("hw.model") }
+
+    /// The macOS build (e.g. "25A354"). An update can move the floor, so a measurement is only
+    /// trusted on the build it was taken on.
+    public static var osBuild: String { sysctlString("kern.osversion") }
+
+    private static func sysctlString(_ name: String) -> String {
         var size = 0
-        sysctlbyname("hw.model", nil, &size, nil, 0)
+        sysctlbyname(name, nil, &size, nil, 0)
         var buffer = [CChar](repeating: 0, count: max(size, 1))
-        sysctlbyname("hw.model", &buffer, &size, nil, 0)
+        sysctlbyname(name, &buffer, &size, nil, 0)
         return String(cString: buffer)
     }
 }

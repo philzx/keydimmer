@@ -20,36 +20,67 @@ final class AppModel {
     private(set) var unsupportedReason: String?
     private(set) var stats = HoldEngine.Stats()
     private(set) var isCalibrating = false
+    /// Whether the ladder comes from a measurement on this Mac and macOS build.
+    private(set) var floorIsMeasured = false
+    private(set) var calibrationFailed = false
     let updates = UpdateChecker()
 
     var hotkeysEnabled: Bool {
         didSet {
             defaults.set(hotkeysEnabled, forKey: Keys.hotkeys)
             hotKeys.isEnabled = hotkeysEnabled
+            hotkeysUnavailable = hotKeys.registrationFailed
         }
     }
+
+    var hotkeyModifiers: HotKeys.Modifiers {
+        didSet {
+            defaults.set(hotkeyModifiers.rawValue, forKey: Keys.hotkeyModifiers)
+            hotKeys.modifiers = hotkeyModifiers
+            hotkeysUnavailable = hotKeys.registrationFailed
+        }
+    }
+
+    /// The shortcuts are on but macOS wouldn't register them (another app has the same keys).
+    private(set) var hotkeysUnavailable = false
 
     var followsInactivity: Bool {
         didSet { defaults.set(followsInactivity, forKey: Keys.followsInactivity) }
     }
 
+    /// On once registered, including while macOS waits for the user to approve it.
     var launchAtLogin: Bool {
-        get { SMAppService.mainApp.status == .enabled }
+        get { _ = launchAtLoginRevision; return [.enabled, .requiresApproval].contains(SMAppService.mainApp.status) }
         set {
             do {
                 if newValue { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+                launchAtLoginError = nil
             } catch {
                 NSLog("KeyDimmer: launch at login change failed: \(error)")
+                launchAtLoginError = error.localizedDescription
             }
             launchAtLoginRevision += 1
         }
     }
-    /// Bumped so SwiftUI re-reads `launchAtLogin`, which lives outside this object.
-    private(set) var launchAtLoginRevision = 0
+
+    var launchAtLoginNeedsApproval: Bool {
+        _ = launchAtLoginRevision
+        return SMAppService.mainApp.status == .requiresApproval
+    }
+
+    private(set) var launchAtLoginError: String?
+    /// Bumped so SwiftUI re-reads the login item status, which lives outside this object.
+    private var launchAtLoginRevision = 0
+
+    /// The user may have approved or removed the login item in System Settings since we last looked.
+    func refreshLaunchAtLogin() { launchAtLoginRevision += 1 }
+
+    func openLoginItemsSettings() { SMAppService.openSystemSettingsLoginItems() }
 
     private enum Keys {
         static let level = "level"
         static let hotkeys = "hotkeysEnabled"
+        static let hotkeyModifiers = "hotkeyModifiers"
         static let followsInactivity = "followsInactivity"
         static let holdDuration = "holdDuration"
         static let autoBrightnessToRestore = "autoBrightnessToRestore"
@@ -72,10 +103,11 @@ final class AppModel {
     init() {
         let defaults = UserDefaults.standard
         hotkeysEnabled = defaults.object(forKey: Keys.hotkeys) as? Bool ?? true
+        hotkeyModifiers = defaults.string(forKey: Keys.hotkeyModifiers).flatMap(HotKeys.Modifiers.init) ?? .controlOption
         followsInactivity = defaults.object(forKey: Keys.followsInactivity) as? Bool ?? true
-        let floor = (defaults.object(forKey: FloorProbe.cacheKey(model: FloorProbe.hardwareModel)) as? Int)
-            .flatMap { $0 >= FloorProbe.minimumPlausibleFloor ? $0 : nil }
+        let floor = Self.cachedFloor(in: defaults)
         ladder = Ladder(floorPWM: floor ?? 54)
+        floorIsMeasured = floor != nil
 
         var reason: String?
         do {
@@ -100,6 +132,11 @@ final class AppModel {
         return "\(pwm)/\(hardware.totalPeriod)"
     }
 
+    var floorDescription: String? {
+        guard let hardware, floorIsMeasured else { return nil }
+        return "\(ladder.floorPWM)/\(hardware.totalPeriod)"
+    }
+
     // MARK: - Lifecycle
 
     func start() {
@@ -111,7 +148,9 @@ final class AppModel {
             DispatchQueue.main.async { self?.brightnessChanged(to: value) }
         }
         hotKeys.onStep = { [weak self] delta in self?.step(by: delta) }
+        hotKeys.modifiers = hotkeyModifiers
         hotKeys.isEnabled = hotkeysEnabled
+        hotkeysUnavailable = hotKeys.registrationFailed
         power = PowerObserver { [weak self] event in self?.powerEvent(event) }
 
         if let saved = defaults.string(forKey: Keys.level).flatMap(decode), saved.isEmber {
@@ -138,7 +177,8 @@ final class AppModel {
     func step(by delta: Int) { select(index: levelIndex + delta) }
 
     func select(_ newLevel: Level) {
-        guard let hardware, isSupported else { return }
+        // A probe in flight owns the backlight; it re-selects the level when it finishes.
+        guard let hardware, isSupported, !isCalibrating else { return }
         trace("select \(newLevel.title)")
         level = newLevel
         defaults.set(encode(newLevel), forKey: Keys.level)
@@ -167,19 +207,51 @@ final class AppModel {
 
     // MARK: - Holding
 
+    private static var floorKey: String { FloorProbe.cacheKey(model: FloorProbe.hardwareModel) }
+    private static var floorBuildKey: String { floorKey + ".osBuild" }
+
+    /// The measured floor, unless it was taken on another macOS build.
+    private static func cachedFloor(in defaults: UserDefaults) -> Int? {
+        guard defaults.string(forKey: floorBuildKey) == FloorProbe.osBuild,
+              let floor = defaults.object(forKey: floorKey) as? Int, floor >= FloorProbe.minimumPlausibleFloor
+        else { return nil }
+        return floor
+    }
+
     private func withFloor(_ then: @escaping () -> Void) {
+        if Self.cachedFloor(in: defaults) != nil { return then() }
+        measureFloor { _ in then() }
+    }
+
+    /// Keeps the previous floor if the measurement fails.
+    private func measureFloor(_ completion: @escaping (Bool) -> Void) {
         guard let hardware else { return }
-        let key = FloorProbe.cacheKey(model: FloorProbe.hardwareModel)
-        if let cached = defaults.object(forKey: key) as? Int, cached >= FloorProbe.minimumPlausibleFloor { return then() }
         isCalibrating = true
         FloorProbe.measure(hardware: hardware, clock: clock) { [weak self] floor in
             guard let self else { return }
             self.isCalibrating = false
             if let floor {
-                self.defaults.set(floor, forKey: key)
+                self.defaults.set(floor, forKey: Self.floorKey)
+                self.defaults.set(FloorProbe.osBuild, forKey: Self.floorBuildKey)
                 self.ladder = Ladder(floorPWM: floor)
+                self.floorIsMeasured = true
             }
-            then()
+            completion(floor != nil)
+        }
+    }
+
+    /// Measures the floor again, then returns to the current level on the (possibly rebuilt) ladder.
+    func recalibrate() {
+        guard hardware != nil, isSupported, !isCalibrating else { return }
+        trace("recalibrate")
+        stopHolding()
+        // Auto-brightness or idle dimming fading mid-probe would spoil the reading.
+        takeOverSystemFeatures()
+        calibrationFailed = false
+        measureFloor { [weak self] success in
+            guard let self else { return }
+            self.calibrationFailed = !success
+            self.select(self.level)
         }
     }
 
@@ -310,6 +382,7 @@ final class AppModel {
     /// another app) changed the keyboard brightness — step aside and follow it.
     private func brightnessChanged(to value: Float) {
         trace("brightness notification \(value)")
+        if isCalibrating { return }
         let floorGoal = HoldEngine.Tuning().floorGoal
         // Hold goals, plus the floor probe's stepping stone.
         let ownGoals: [Float] = [0, floorGoal, floorGoal * 2]
