@@ -14,7 +14,7 @@ struct KeyDimmerApp: App {
         MenuBarExtra {
             MenuContent(model: delegate.model)
         } label: {
-            Image(nsImage: StatusIcon.image(for: delegate.model.level, in: delegate.model.ladder))
+            Image(nsImage: StatusIcon.image(for: delegate.model.iconLevel, in: delegate.model.iconLadder))
         }
         .menuBarExtraStyle(.window)
     }

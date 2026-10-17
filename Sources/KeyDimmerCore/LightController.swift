@@ -17,14 +17,17 @@ public enum Light: Hashable, Sendable, CaseIterable {
     case display
 }
 
-/// Owns every light (the keyboard and the built-in display), their ladders and every rule about them.
+/// Owns every light this Mac has (the keyboard and the built-in display), their ladders and every
+/// rule about them. Each light is independently present: a command or event for a light this Mac
+/// doesn't have does nothing.
 ///
 /// It takes commands (select a level, step), receives events (macOS changed the brightness, will
 /// sleep, did wake, will quit) and publishes the state the menu renders. It watches the lid and
 /// the user's inactivity itself while holding an ember. Everything runs on the clock's queue.
 ///
 /// The keyboard-only members (`ladder`, `level`, `select(_:)`, `step(by:)`, …) predate the display
-/// and are shorthands for `.keyboard`.
+/// and are shorthands for `.keyboard`. Without a keyboard backlight they keep placeholder values
+/// and do nothing; `has(.keyboard)` tells the two apart.
 @Observable
 public final class LightController {
     public enum Pause: Equatable, Sendable {
@@ -58,7 +61,17 @@ public final class LightController {
     /// Diagnostics trace (KEYDIMMER_TRACE in the app).
     @ObservationIgnored public var onTrace: ((String) -> Void)?
 
-    public var totalPeriod: Int { hardware.totalPeriod }
+    public var totalPeriod: Int { hardware?.totalPeriod ?? 0 }
+
+    /// The lights this Mac has, in menu order. Shortcuts and Link should only act on these.
+    public var lights: [Light] { Light.allCases.filter(has) }
+
+    public func has(_ light: Light) -> Bool {
+        switch light {
+        case .keyboard: return hardware != nil
+        case .display: return display != nil
+        }
+    }
     public var levelIndex: Int { ladder.index(of: level) ?? 0 }
 
     private enum Keys {
@@ -69,7 +82,8 @@ public final class LightController {
         static let displayLevel = "displayLevel"
     }
 
-    @ObservationIgnored private let hardware: BacklightHardware
+    /// The keyboard backlight; nil if this Mac has none KeyDimmer can drive.
+    @ObservationIgnored private let hardware: BacklightHardware?
     @ObservationIgnored private let display: DisplayHardware?
     /// Whether the display's gamma table is one of our shades.
     @ObservationIgnored private var displayIsShaded = false
@@ -93,12 +107,12 @@ public final class LightController {
     @ObservationIgnored private var idleLimit: TimeInterval = 0
 
     /// - Parameters:
-    ///   - hardware: the keyboard backlight.
+    ///   - hardware: the keyboard backlight, or nil if this Mac has none KeyDimmer can drive.
     ///   - display: the built-in display, or nil if this Mac has none KeyDimmer can drive.
     ///   - secondsSinceLastInput: time since the user last touched any input device.
     ///   - hardwareModel, osBuild: identify this Mac and macOS build for the floor cache.
     public init(
-        hardware: BacklightHardware, display: DisplayHardware? = nil, clock: EngineClock, store: SettingsStore,
+        hardware: BacklightHardware?, display: DisplayHardware? = nil, clock: EngineClock, store: SettingsStore,
         secondsSinceLastInput: @escaping () -> TimeInterval,
         hardwareModel: String = FloorProbe.hardwareModel, osBuild: String = FloorProbe.osBuild
     ) {
@@ -125,23 +139,33 @@ public final class LightController {
     /// Puts right what a crash may have left behind, then returns to the saved ember or shows
     /// whatever macOS is at.
     public func start() {
+        startKeyboard()
+        startDisplay()
+    }
+
+    private func startKeyboard() {
+        guard let hardware else { return }
         restoreAutoBrightnessAfterCrash()
         if let saved = (store.object(forKey: Keys.level) as? String).flatMap(decode), saved.isEmber {
             select(saved)
         } else {
             level = ladder.nearestLevel(forBrightness: hardware.brightness())
         }
-        startDisplay()
     }
 
     /// Leaves the keyboard as dim as macOS can keep it without us, and hands features back.
     public func willQuit() {
+        quitKeyboard()
+        quitDisplay()
+    }
+
+    private func quitKeyboard() {
+        guard let hardware else { return }
         engine?.stop()
         if level.isEmber {
             hardware.setBrightness(HoldEngine.Tuning().floorGoal, fadeSpeed: 350, commit: true)
         }
         releaseSystemFeatures()
-        quitDisplay()
     }
 
     // MARK: - Selection
@@ -149,7 +173,7 @@ public final class LightController {
     /// The light's ladder; nil if this Mac doesn't have the light.
     public func ladder(of light: Light) -> Ladder? {
         switch light {
-        case .keyboard: return ladder
+        case .keyboard: return hardware == nil ? nil : ladder
         case .display: return displayLadder
         }
     }
@@ -157,7 +181,7 @@ public final class LightController {
     /// The light's current level; nil if this Mac doesn't have the light.
     public func level(of light: Light) -> Level? {
         switch light {
-        case .keyboard: return level
+        case .keyboard: return hardware == nil ? nil : level
         case .display: return displayLevel
         }
     }
@@ -187,7 +211,7 @@ public final class LightController {
 
     public func select(_ newLevel: Level) {
         // A probe in flight owns the backlight; it re-selects the level when it finishes.
-        guard !isCalibrating, !newLevel.isShade else { return }
+        guard let hardware, !isCalibrating, !newLevel.isShade else { return }
         trace("select \(newLevel.title)")
         level = newLevel
         store.set(encode(newLevel), forKey: Keys.level)
@@ -319,6 +343,7 @@ public final class LightController {
 
     /// Keeps the previous floor if the measurement fails.
     private func measureFloor(_ completion: @escaping (Bool) -> Void) {
+        guard let hardware else { return completion(false) }
         isCalibrating = true
         FloorProbe.measure(hardware: hardware, clock: clock) { [weak self] floor in
             guard let self else { return }
@@ -335,7 +360,7 @@ public final class LightController {
 
     /// Measures the floor again, then returns to the current level on the (possibly rebuilt) ladder.
     public func recalibrate() {
-        guard !isCalibrating else { return }
+        guard hardware != nil, !isCalibrating else { return }
         trace("recalibrate")
         stopHolding()
         // Auto-brightness or idle dimming fading mid-probe would spoil the reading.
@@ -351,6 +376,7 @@ public final class LightController {
     // MARK: - Holding
 
     private func startHolding(pwm: Int) {
+        guard let hardware else { return }
         if engine == nil || engine?.floorPWM != ladder.floorPWM {
             engine?.stop()
             let engine = HoldEngine(hardware: hardware, clock: clock, floorPWM: ladder.floorPWM, tuning: tuning)
@@ -385,6 +411,7 @@ public final class LightController {
 
     /// Auto-brightness and idle dimming would issue their own fades and break a hold.
     private func takeOverSystemFeatures() {
+        guard let hardware else { return }
         if engine?.phase != .holding { idleLimit = hardware.idleDimTime() }
         if store.object(forKey: Keys.autoBrightnessToRestore) == nil {
             store.set(hardware.isAutoBrightnessEnabled, forKey: Keys.autoBrightnessToRestore)
@@ -394,6 +421,7 @@ public final class LightController {
     }
 
     private func releaseSystemFeatures() {
+        guard let hardware else { return }
         hardware.setIdleDimmingSuspended(false)
         if let auto = store.object(forKey: Keys.autoBrightnessToRestore) as? Bool {
             hardware.setAutoBrightness(auto)
@@ -416,7 +444,7 @@ public final class LightController {
     }
 
     private func monitor() {
-        guard level.isEmber else { return }
+        guard let hardware, level.isEmber else { return }
         defer { scheduleMonitor() }
         if pause == .sleeping { return }
 
@@ -436,7 +464,7 @@ public final class LightController {
         pause = reason
         engine?.stop()
         // A gentle fade out, like macOS does for inactivity.
-        hardware.setBrightness(0, fadeSpeed: reason == .inactive ? 2_000 : 0, commit: false)
+        hardware?.setBrightness(0, fadeSpeed: reason == .inactive ? 2_000 : 0, commit: false)
     }
 
     private func resumeHolding() {
@@ -483,7 +511,7 @@ public final class LightController {
     /// another app) changed the keyboard brightness — step aside and follow it.
     public func brightnessChanged(to value: Float) {
         trace("brightness notification \(value)")
-        if isCalibrating { return }
+        if hardware == nil || isCalibrating { return }
         let floorGoal = HoldEngine.Tuning().floorGoal
         // Hold goals, plus the floor probe's stepping stone.
         let ownGoals: [Float] = [0, floorGoal, floorGoal * 2]

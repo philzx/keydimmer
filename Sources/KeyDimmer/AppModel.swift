@@ -12,8 +12,10 @@ import ServiceManagement
 final class AppModel {
     typealias Pause = LightController.Pause
 
-    /// Every light's rules. Nil when this Mac has no keyboard backlight KeyDimmer can drive.
+    /// Every light's rules. Nil when this Mac has no light KeyDimmer can drive.
     let controller: LightController?
+    /// Why KeyDimmer can't do anything on this Mac: set only when it has no light at all. A Mac
+    /// missing just one light simply doesn't show it.
     let unsupportedReason: String?
     let updates = UpdateChecker()
     /// Snapshots only: levels shown without driving the hardware.
@@ -24,6 +26,9 @@ final class AppModel {
     var displayLadder: Ladder? { controller?.displayLadder }
     var displayLevel: Level? { previewDisplayLevel ?? controller?.displayLevel }
     var displayLevelIndex: Int { displayLevel.flatMap { displayLadder?.index(of: $0) } ?? 0 }
+
+    var hasKeyboard: Bool { controller?.has(.keyboard) ?? false }
+    var hasDisplay: Bool { controller?.has(.display) ?? false }
 
     var ladder: Ladder { controller?.ladder ?? Ladder(floorPWM: 54) }
     var level: Level { previewLevel ?? controller?.level ?? .off }
@@ -102,32 +107,37 @@ final class AppModel {
         hotkeyModifiers = defaults.string(forKey: Keys.hotkeyModifiers).flatMap(HotKeys.Modifiers.init) ?? .controlOption
 
         var hardware: BacklightHardware?
-        var reason: String?
+        var keyboardReason: String?
         do {
             hardware = try CoreBrightnessBacklight()
         } catch {
-            reason = "\(error)"
+            keyboardReason = "\(error)"
         }
         if let found = hardware, found.readPWM() == nil {
             hardware = nil
-            reason = "This Mac has no Apple Silicon keyboard backlight PWM"
+            keyboardReason = "This Mac has no Apple Silicon keyboard backlight PWM"
         }
+        if let keyboardReason { NSLog("KeyDimmer: no keyboard light: \(keyboardReason)") }
         self.hardware = hardware
-        unsupportedReason = reason
-        let display: DisplayHardware?
+        var display: DisplayHardware?
+        var displayReason: String?
         do {
             display = try BuiltInDisplay()
         } catch {
             NSLog("KeyDimmer: no display light: \(error)")
-            display = nil
+            displayReason = "\(error)"
         }
-        controller = hardware.map { hardware in
-            LightController(
+        if hardware == nil, display == nil {
+            controller = nil
+            unsupportedReason = [keyboardReason, displayReason].compactMap { $0 }.joined(separator: ". ")
+        } else {
+            controller = LightController(
                 hardware: hardware, display: display, clock: DispatchClock(), store: defaults,
                 secondsSinceLastInput: {
                     CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: CGEventType(rawValue: ~0)!)
                 }
             )
+            unsupportedReason = nil
         }
         if ProcessInfo.processInfo.environment["KEYDIMMER_TRACE"] != nil {
             controller?.onTrace = { message in
@@ -137,7 +147,9 @@ final class AppModel {
         }
     }
 
-    var isSupported: Bool { unsupportedReason == nil }
+    /// The light the menu bar icon shows: the keyboard if this Mac has one, else the display.
+    var iconLevel: Level { hasKeyboard ? level : displayLevel ?? .off }
+    var iconLadder: Ladder { hasKeyboard ? ladder : displayLadder ?? ladder }
 
     var levelIndex: Int { ladder.index(of: level) ?? 0 }
 
@@ -155,12 +167,17 @@ final class AppModel {
 
     func start() {
         updates.start()
-        guard let hardware, let controller else { return }
-        hardware.observeBrightness { [weak controller] value in
+        guard let controller else { return }
+        hardware?.observeBrightness { [weak controller] value in
             DispatchQueue.main.async { controller?.brightnessChanged(to: value) }
         }
-        hotKeys.onStep = { [weak controller] light, delta in controller?.step(light, by: delta) }
-        hotKeys.lights = controller.displayLadder == nil ? [.keyboard] : [.keyboard, .display]
+        // Shortcuts are registered and routed only for the lights this Mac has (`controller.lights`),
+        // so an absent light's keys stay free for other apps.
+        hotKeys.lights = Set(controller.lights)
+        hotKeys.onStep = { [weak controller] light, delta in
+            guard let controller, controller.has(light) else { return }
+            controller.step(light, by: delta)
+        }
         hotKeys.modifiers = hotkeyModifiers
         hotKeys.isEnabled = hotkeysEnabled
         unavailableShortcuts = hotKeys.failedLights
