@@ -40,6 +40,41 @@ struct GammaConflictTests {
         #expect(rig.display.brightnessCommands + rig.display.gammaCommands == commands + 1)
     }
 
+    @Test(arguments: [true, false])
+    func aGammaAppRemovingAShadeHandsAutomaticBrightnessBackAsFound(autoBrightness: Bool) {
+        let rig = Rig()
+        rig.display.isAutoBrightnessEnabled = autoBrightness
+        let controller = rig.launch()
+        controller.select(Ladder.display().shade(3)!, on: .display)
+        #expect(rig.display.isAutoBrightnessEnabled == false)
+
+        controller.otherGammaAppLaunched(bundleIdentifier: "org.herf.Flux")
+
+        #expect(rig.display.isAutoBrightnessEnabled == autoBrightness)
+        // A display shortcut stepping down from the floor can't reach a shade and pause it again.
+        controller.step(.display, by: -1)
+        #expect(controller.level(of: .display) == .system(step: 1))
+        #expect(rig.display.isAutoBrightnessEnabled == autoBrightness)
+    }
+
+    @Test func aSavedShadeStandingDownAtLaunchHandsAutomaticBrightnessBack() {
+        let rig = Rig()
+        rig.display.isAutoBrightnessEnabled = true
+        rig.launch().select(Ladder.display().shade(4)!, on: .display)
+        rig.display.restoreGamma() // The process ended on a shade; automatic brightness is still paused.
+        #expect(rig.display.isAutoBrightnessEnabled == false)
+
+        let next = LightController(
+            hardware: rig.backlight, display: rig.display, clock: rig.clock, store: rig.store,
+            secondsSinceLastInput: { 0 }, hardwareModel: Rig.model, osBuild: Rig.build
+        )
+        next.otherGammaAppLaunched(bundleIdentifier: "fyi.lunar.Lunar")
+        next.start()
+
+        #expect(next.level(of: .display) == .system(step: 1))
+        #expect(rig.display.isAutoBrightnessEnabled == true)
+    }
+
     @Test func whenTheGammaAppQuitsShadesAreAvailableAgainButTheDisplayStaysWhereItIs() {
         let rig = Rig()
         let controller = rig.launch()
