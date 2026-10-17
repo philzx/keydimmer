@@ -32,7 +32,7 @@ final class AppModel {
     var hasKeyboard: Bool { controller?.has(.keyboard) ?? false }
     var hasDisplay: Bool { controller?.has(.display) ?? false }
 
-    var ladder: Ladder { controller?.ladder ?? Ladder(floorPWM: 54) }
+    var ladder: Ladder { controller?.ladder ?? Ladder(floorPWM: Ladder.assumedFloorPWM) }
     var level: Level { previewLevel ?? controller?.level ?? .off }
     var pause: Pause? { controller?.pause }
     var stats: HoldEngine.Stats { previewLevel == nil ? controller?.stats ?? HoldEngine.Stats() : Self.previewStats }

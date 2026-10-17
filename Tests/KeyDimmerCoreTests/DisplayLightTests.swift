@@ -27,11 +27,11 @@ struct DisplayLightTests {
         #expect(factors.count == 8)
         // The darkest shade keeps roughly 10-15% of the picture, so it stays readable.
         #expect(factors[0] >= 0.10 && factors[0] <= 0.15)
-        // Every step is the same change in darkness, including the step up to the unshaded floor:
-        // no gap between the brightest shade and the dimmest system step.
-        let ratios = zip(factors.dropFirst() + [1], factors).map { $0 / $1 }
+        // The brightest shade sits right below the dimmest system step: just under the full picture.
+        #expect(factors[7] >= 0.85 && factors[7] < 0.95)
+        // Every step between shades is the same change in darkness.
+        let ratios = zip(factors.dropFirst(), factors).map { $0 / $1 }
         for ratio in ratios { #expect(abs(ratio - ratios[0]) < 0.0001) }
-        #expect(factors[7] < 1)
     }
 
     @Test func theDisplayFloorIsTheDimmestSystemStep() {

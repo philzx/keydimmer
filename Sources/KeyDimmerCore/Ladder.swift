@@ -3,9 +3,9 @@ import Foundation
 /// One position on KeyDimmer's single slider.
 public enum Level: Equatable, Hashable, Sendable {
     case off
-    /// A sub-minimum level, held by KeyDimmer at `pwm` / totalPeriod duty. `index` starts at 1 (dimmest).
+    /// A level below the floor, held by KeyDimmer at `pwm` / totalPeriod duty. `index` starts at 1 (dimmest).
     case ember(index: Int, pwm: Int)
-    /// A sub-floor level made by scaling the picture's gamma by `factor` (0...1) while the display
+    /// A level below the floor made by scaling the picture's gamma by `factor` (0...1) while the display
     /// sits at its floor. `index` starts at 1 (darkest).
     case shade(index: Int, factor: Float)
     /// One of macOS's own 16 brightness steps (1...16).
@@ -47,7 +47,7 @@ public enum Level: Equatable, Hashable, Sendable {
 
 /// The ordered list of slider positions for one light.
 ///
-/// The keyboard's ladder is Off, the sub-minimum embers, then the 16 macOS steps. Unlike fixed PWM
+/// The keyboard's ladder is Off, the embers, then the 16 macOS steps. Unlike fixed PWM
 /// targets, the embers are spread geometrically between a duty of 1 count and most of the way to
 /// this Mac's own floor, so there is no visual gap between the brightest ember and the dimmest
 /// macOS step regardless of the panel's floor.
@@ -61,6 +61,11 @@ public struct Ladder: Equatable, Sendable {
     /// How much of the picture the darkest shade keeps. Tuned by eye on hardware: dark enough to
     /// matter in a dark room, light enough to stay readable.
     public static let darkestShade: Float = 0.12
+    /// How much of the picture the brightest shade keeps: just under all of it, so the brightest
+    /// shade sits right below the dimmest system step.
+    public static let brightestShade: Float = 0.9
+    /// The keyboard floor assumed until it has been measured on this Mac (a 15" M4 MacBook Air's).
+    public static let assumedFloorPWM = 54
 
     /// The keyboard's measured floor; 0 on a ladder without embers.
     public let floorPWM: Int
@@ -83,17 +88,16 @@ public struct Ladder: Equatable, Sendable {
 
     /// The built-in display's ladder: the shades, then the macOS steps, with the floor (the dimmest
     /// step) in between.
-    public static func display(shadeCount: Int = Ladder.shadeCount, darkestShade: Float = Ladder.darkestShade) -> Ladder {
-        let shades = shadeFactors(count: shadeCount, darkest: darkestShade)
+    public static func display() -> Ladder {
+        let shades = shadeFactors(count: shadeCount, darkest: darkestShade, brightest: brightestShade)
         return Ladder(levels: shades.enumerated().map { Level.shade(index: $0.offset + 1, factor: $0.element) } + systemLevels)
     }
 
-    /// Gamma factors from `darkest` up to just under 1, spaced geometrically so that each shade
-    /// looks like the same change in darkness. The unshaded floor (1.0) is the next term of the
-    /// series, so the step from the brightest shade to the dimmest macOS step is the same size too.
-    public static func shadeFactors(count: Int, darkest: Float) -> [Float] {
-        guard count > 0 else { return [] }
-        return (0..<count).map { i in pow(darkest, Float(count - i) / Float(count)) }
+    /// Gamma factors from `darkest` up to `brightest`, spaced geometrically so that each shade
+    /// looks like the same change in darkness.
+    public static func shadeFactors(count: Int, darkest: Float, brightest: Float) -> [Float] {
+        guard count > 1 else { return count == 1 ? [darkest] : [] }
+        return (0..<count).map { i in darkest * pow(brightest / darkest, Float(i) / Float(count - 1)) }
     }
 
     /// Strictly increasing integer PWM targets from 1 up to ~80% of `floorPWM`, geometrically spaced

@@ -158,9 +158,9 @@ public final class LightController {
         linkSetting = store.object(forKey: Keys.isLinked) as? Bool ?? false
         if let duration = store.object(forKey: Keys.holdDuration) as? Double { tuning.holdDuration = duration }
         // Placeholder so `cachedFloor()` can run; replaced on the next line.
-        ladder = Ladder(floorPWM: 54)
+        ladder = Ladder(floorPWM: Ladder.assumedFloorPWM)
         let floor = cachedFloor()
-        ladder = Ladder(floorPWM: floor ?? 54)
+        ladder = Ladder(floorPWM: floor ?? Ladder.assumedFloorPWM)
         floorIsMeasured = floor != nil
     }
 
