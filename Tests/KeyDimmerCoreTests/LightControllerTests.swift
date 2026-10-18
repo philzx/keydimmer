@@ -49,6 +49,28 @@ final class Rig {
     }
 
     func run(for seconds: TimeInterval) { clock.run(until: clock.now + seconds) }
+
+    /// Which way a held ember's slow fade is heading: down towards 0 or up towards the floor.
+    enum HoldLeg { case down, up }
+
+    var holdLeg: HoldLeg { backlight.brightness() == 0 ? .down : .up }
+
+    /// Runs in 1 ms steps, calling `each` before every step, until `done` (or a minute passes).
+    func step(until done: () -> Bool, each: () -> Void = {}) {
+        let deadline = clock.now + 60
+        while !done(), clock.now < deadline {
+            each()
+            run(for: 0.001)
+        }
+    }
+
+    func runUntilHold(on leg: HoldLeg) { step(until: { holdLeg == leg }) }
+
+    /// Keeps `trigger` set only while the hold is on `leg`, until the controller pauses, so the
+    /// pause starts on that leg whenever the lid or inactivity is polled.
+    func pause(on leg: HoldLeg, by trigger: (Bool) -> Void, controller: LightController) {
+        step(until: { controller.pause != nil }, each: { trigger(holdLeg == leg) })
+    }
 }
 
 struct LightControllerTests {
@@ -241,14 +263,81 @@ struct LightControllerTests {
         rig.backlight.lidClosed = true
         rig.run(for: 2)
         #expect(controller.pause == .lidClosed)
-        // A goal of 0 is ignored while the hold's slow fade down is in flight, so the light can
-        // take until the end of that fade to go dark.
-        rig.run(for: HoldEngine.Tuning().holdDuration)
         #expect(rig.backlight.pwm == 0)
 
         rig.backlight.lidClosed = false
         rig.run(for: 15)
         #expect(controller.pause == nil)
+        #expect(rig.backlight.pwm == emberPWM(controller, 3))
+    }
+
+    @Test(arguments: [Rig.HoldLeg.down, .up])
+    func closingTheLidTurnsAnEmberOffAtOnceWhicheverWayTheHoldIsFading(leg: Rig.HoldLeg) {
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.select(index: 3)
+        rig.run(for: 10)
+        let ember = controller.level
+
+        rig.pause(on: leg, by: { rig.backlight.lidClosed = $0 }, controller: controller)
+        #expect(controller.pause == .lidClosed)
+        rig.run(for: 0.1)
+        #expect(rig.backlight.pwm == 0)
+        rig.run(for: 5)
+        #expect(controller.level == ember)
+        #expect(controller.pause == .lidClosed)
+
+        rig.backlight.lidClosed = false
+        rig.run(for: 15)
+        #expect(controller.pause == nil)
+        #expect(controller.level == ember)
+        #expect(rig.backlight.pwm == emberPWM(controller, 3))
+    }
+
+    @Test(arguments: [Rig.HoldLeg.down, .up])
+    func inactivityFadesAnEmberOutGentlyWhicheverWayTheHoldIsFading(leg: Rig.HoldLeg) {
+        let rig = Rig()
+        rig.backlight.idleDimSeconds = 30
+        let controller = rig.launch()
+        controller.select(index: 3)
+        rig.run(for: 10)
+        let ember = controller.level
+
+        rig.pause(on: leg, by: { rig.secondsIdle = $0 ? 31 : 0 }, controller: controller)
+        #expect(controller.pause == .inactive)
+        rig.run(for: 0.5)
+        #expect(rig.backlight.pwm > 0, "a gentle fade, not an instant cut")
+        rig.run(for: HoldEngine.Tuning().approachDuration)
+        #expect(rig.backlight.pwm == 0)
+        #expect(controller.level == ember)
+        #expect(controller.pause == .inactive)
+
+        rig.secondsIdle = 0
+        rig.run(for: 15)
+        #expect(controller.pause == nil)
+        #expect(controller.level == ember)
+        #expect(rig.backlight.pwm == emberPWM(controller, 3))
+    }
+
+    @Test(arguments: [Rig.HoldLeg.down, .up])
+    func sleepTurnsAnEmberOffAtOnceWhicheverWayTheHoldIsFading(leg: Rig.HoldLeg) {
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.select(index: 3)
+        rig.run(for: 10)
+        let ember = controller.level
+        rig.runUntilHold(on: leg)
+
+        controller.willSleep()
+        rig.run(for: 0.1)
+        #expect(rig.backlight.pwm == 0)
+        #expect(controller.level == ember)
+        #expect(controller.pause == .sleeping)
+
+        controller.didWake()
+        rig.run(for: 15)
+        #expect(controller.pause == nil)
+        #expect(controller.level == ember)
         #expect(rig.backlight.pwm == emberPWM(controller, 3))
     }
 

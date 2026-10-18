@@ -245,9 +245,13 @@ final class KeyboardLight {
     private func pauseHolding(_ reason: LightController.Pause) {
         trace("pause \(reason)")
         pause = reason
-        engine?.stop()
         // A gentle fade out, like macOS does for inactivity.
-        hardware.setBrightness(0, fadeSpeed: reason == .inactive ? 2_000 : 0, commit: false)
+        let fadeSpeed: Int32 = reason == .inactive ? tuning.approachFadeSpeed : 0
+        if let engine {
+            engine.fadeOut(fadeSpeed: fadeSpeed)
+        } else {
+            hardware.setBrightness(0, fadeSpeed: fadeSpeed, commit: false)
+        }
     }
 
     private func resumeHolding() {

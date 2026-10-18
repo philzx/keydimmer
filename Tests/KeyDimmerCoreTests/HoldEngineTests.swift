@@ -117,6 +117,24 @@ struct HoldEngineTests {
         #expect(backlight.commands == commands)
     }
 
+    @Test(arguments: [true, false], [0, 0.003])
+    func fadeOutTurnsTheLightOffAtItsOwnSpeedWhicheverWayTheHoldIsFading(fadingDown: Bool, latency: TimeInterval) {
+        let clock = FakeClock()
+        let backlight = SimulatedBacklight(clock: clock, latency: latency)
+        let engine = HoldEngine(hardware: backlight, clock: clock, floorPWM: 54)
+        engine.hold(pwm: 6)
+        clock.run(until: 10)
+        let goal: Float = fadingDown ? 0 : HoldEngine.Tuning().floorGoal
+        while backlight.brightness() != goal { clock.run(until: clock.now + 0.001) }
+
+        engine.fadeOut(fadeSpeed: 0)
+        clock.run(until: clock.now + 0.1)
+
+        #expect(engine.phase == .idle)
+        #expect(backlight.pwm == 0)
+        #expect(engine.lastCommandedGoal == 0)
+    }
+
     @Test func clampsTargetsBelowTheFloor() {
         let clock = FakeClock()
         let backlight = SimulatedBacklight(clock: clock)
