@@ -25,7 +25,7 @@ final class KeyboardLight {
 
     var totalPeriod: Int { hardware.totalPeriod }
 
-    enum Keys {
+    private enum Keys {
         static let level = "level"
         static let followsInactivity = "followsInactivity"
         static let holdDuration = "holdDuration"
@@ -60,14 +60,17 @@ final class KeyboardLight {
         self.secondsSinceLastInput = secondsSinceLastInput
         followsInactivity = Self.followsInactivity(in: store)
         if let duration = store.object(forKey: Keys.holdDuration) as? Double { tuning.holdDuration = duration }
-        let floor = floorCache.floor
-        ladder = Ladder(floorPWM: floor ?? Ladder.assumedFloorPWM)
-        floorIsMeasured = floor != nil
+        ladder = floorCache.ladder
+        floorIsMeasured = floorCache.floor != nil
     }
 
-    /// The saved inactivity setting, for a controller without a keyboard to read it from.
+    /// The saved inactivity setting, for a controller without a keyboard to read and write.
     static func followsInactivity(in store: SettingsStore) -> Bool {
         store.object(forKey: Keys.followsInactivity) as? Bool ?? true
+    }
+
+    static func setFollowsInactivity(_ follows: Bool, in store: SettingsStore) {
+        store.set(follows, forKey: Keys.followsInactivity)
     }
 
     // MARK: - Lifecycle

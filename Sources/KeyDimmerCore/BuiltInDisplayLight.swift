@@ -25,7 +25,7 @@ final class BuiltInDisplayLight {
     @ObservationIgnored var onLevelChange: (() -> Void)?
     @ObservationIgnored var onTrace: ((String) -> Void)?
 
-    enum Keys {
+    private enum Keys {
         static let level = "displayLevel"
         /// The display's automatic brightness as found before the first shade; present only while
         /// on shades, so a crash on a shade leaves it for the next launch to hand back.

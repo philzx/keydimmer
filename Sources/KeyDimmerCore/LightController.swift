@@ -62,7 +62,7 @@ public final class LightController {
     public var followsInactivity: Bool {
         get { keyboard?.followsInactivity ?? KeyboardLight.followsInactivity(in: store) }
         set {
-            if let keyboard { keyboard.followsInactivity = newValue } else { store.set(newValue, forKey: KeyboardLight.Keys.followsInactivity) }
+            if let keyboard { keyboard.followsInactivity = newValue } else { KeyboardLight.setFollowsInactivity(newValue, in: store) }
         }
     }
 
@@ -126,9 +126,8 @@ public final class LightController {
                           secondsSinceLastInput: secondsSinceLastInput)
         }
         self.display = display.map { BuiltInDisplayLight(hardware: $0, clock: clock, store: store) }
-        let floor = floorCache.floor
-        placeholderLadder = Ladder(floorPWM: floor ?? Ladder.assumedFloorPWM)
-        placeholderFloorIsMeasured = floor != nil
+        placeholderLadder = floorCache.ladder
+        placeholderFloorIsMeasured = floorCache.floor != nil
         self.clock = clock
         self.store = store
         linkSetting = store.object(forKey: Keys.isLinked) as? Bool ?? false
@@ -139,7 +138,7 @@ public final class LightController {
     }
 
     /// The light this Mac has for `light`, or nil: the one place commands pick a light.
-    private func route(_ light: Light) -> (any LightRules)? {
+    private func route(_ light: Light) -> (any RoutableLight)? {
         switch light {
         case .keyboard: return keyboard
         case .display: return display
@@ -288,18 +287,18 @@ public final class LightController {
 }
 
 /// What the controller needs from every light to route commands to it.
-protocol LightRules: AnyObject {
+protocol RoutableLight: AnyObject {
     var ladder: Ladder { get }
-    /// Nil until the light has read its level.
+    /// The light's level; nil while the light hasn't read it yet (the display before `start()`).
     var currentLevel: Level? { get }
     func select(_ level: Level)
 }
 
-extension KeyboardLight: LightRules {
+extension KeyboardLight: RoutableLight {
     var currentLevel: Level? { level }
 }
 
-extension BuiltInDisplayLight: LightRules {
+extension BuiltInDisplayLight: RoutableLight {
     var currentLevel: Level? { level }
 }
 
@@ -345,6 +344,9 @@ struct FloorCache {
         else { return nil }
         return floor
     }
+
+    /// The keyboard's ladder on the measured floor, or on the assumed one until it's measured.
+    var ladder: Ladder { Ladder(floorPWM: floor ?? Ladder.assumedFloorPWM) }
 
     func save(_ floor: Int) {
         store.set(floor, forKey: key)
