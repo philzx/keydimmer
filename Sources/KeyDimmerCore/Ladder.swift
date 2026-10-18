@@ -21,6 +21,15 @@ public enum Level: Equatable, Hashable, Sendable {
         return false
     }
 
+    /// The 1-based index of an ember or a shade among the levels below the floor (1 is the dimmest);
+    /// nil for Off and the system steps.
+    public var belowFloorIndex: Int? {
+        switch self {
+        case let .ember(index, _), let .shade(index, _): return index
+        case .off, .system: return nil
+        }
+    }
+
     public var title: String {
         switch self {
         case .off: return "Off"
@@ -121,27 +130,43 @@ public struct Ladder: Equatable, Sendable {
     public var count: Int { levels.count }
 
     /// How many embers this ladder has (fewer than `Ladder.emberCount` on a very low floor).
-    public var emberCount: Int { levels.filter(\.isEmber).count }
+    public var emberCount: Int { levelsBelowFloor(where: \.isEmber).count }
 
     /// How many shades this ladder has.
-    public var shadeCount: Int { levels.filter(\.isShade).count }
+    public var shadeCount: Int { levelsBelowFloor(where: \.isShade).count }
+
+    /// How many levels this ladder has below the floor: its embers or its shades.
+    public var belowFloorCount: Int { levelsBelowFloor().count }
 
     public func index(of level: Level) -> Int? { levels.firstIndex(of: level) }
 
     public func level(at index: Int) -> Level { levels[min(max(index, 0), levels.count - 1)] }
 
     /// The ember with this 1-based index, clamped to the embers this floor allows.
-    public func ember(_ index: Int) -> Level? {
-        let embers = levels.filter(\.isEmber)
-        guard !embers.isEmpty else { return nil }
-        return embers[min(max(index, 1), embers.count) - 1]
-    }
+    public func ember(_ index: Int) -> Level? { belowFloor(index, where: \.isEmber) }
 
     /// The shade with this 1-based index, clamped to the shades on this ladder.
-    public func shade(_ index: Int) -> Level? {
-        let shades = levels.filter(\.isShade)
-        guard !shades.isEmpty else { return nil }
-        return shades[min(max(index, 1), shades.count) - 1]
+    public func shade(_ index: Int) -> Level? { belowFloor(index, where: \.isShade) }
+
+    /// The level below the floor with this 1-based index, clamped to the ones on this ladder.
+    public func belowFloor(_ index: Int) -> Level? { belowFloor(index, where: { _ in true }) }
+
+    /// How far up the levels below the floor `level` sits, in (0, 1] with the brightest at 1; nil for
+    /// Off and the system steps.
+    public func belowFloorFraction(of level: Level) -> Double? {
+        guard let index = level.belowFloorIndex else { return nil }
+        let sameKind = levelsBelowFloor { $0.isEmber == level.isEmber }
+        return Double(index) / Double(max(sameKind.count, 1))
+    }
+
+    private func levelsBelowFloor(where kind: (Level) -> Bool = { _ in true }) -> [Level] {
+        levels.filter { $0.belowFloorIndex != nil && kind($0) }
+    }
+
+    private func belowFloor(_ index: Int, where kind: (Level) -> Bool) -> Level? {
+        let matching = levelsBelowFloor(where: kind)
+        guard !matching.isEmpty else { return nil }
+        return matching[min(max(index, 1), matching.count) - 1]
     }
 
     /// Reads a `Level.storageName` back on this ladder; nil if this ladder has no such kind of level.
