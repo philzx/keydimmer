@@ -49,6 +49,22 @@ final class Rig {
     }
 
     func run(for seconds: TimeInterval) { clock.run(until: clock.now + seconds) }
+
+    /// Which way a held ember's slow fade is heading: down towards 0 or up towards the floor.
+    enum HoldLeg { case down, up }
+
+    var holdLeg: HoldLeg { backlight.brightness() == 0 ? .down : .up }
+
+    /// Runs in small steps, keeping `condition` true only while the hold is on `leg`, until the
+    /// controller pauses (or a minute passes), so the pause starts on that leg whenever the lid or
+    /// inactivity is polled.
+    func pause(on leg: HoldLeg, by condition: (Bool) -> Void, controller: LightController) {
+        let deadline = clock.now + 60
+        while controller.pause == nil, clock.now < deadline {
+            condition(holdLeg == leg)
+            run(for: 0.001)
+        }
+    }
 }
 
 struct LightControllerTests {
@@ -241,14 +257,81 @@ struct LightControllerTests {
         rig.backlight.lidClosed = true
         rig.run(for: 2)
         #expect(controller.pause == .lidClosed)
-        // A goal of 0 is ignored while the hold's slow fade down is in flight, so the light can
-        // take until the end of that fade to go dark.
-        rig.run(for: HoldEngine.Tuning().holdDuration)
         #expect(rig.backlight.pwm == 0)
 
         rig.backlight.lidClosed = false
         rig.run(for: 15)
         #expect(controller.pause == nil)
+        #expect(rig.backlight.pwm == emberPWM(controller, 3))
+    }
+
+    @Test(arguments: [Rig.HoldLeg.down, .up])
+    func closingTheLidTurnsAnEmberOffAtOnceWhicheverWayTheHoldIsFading(leg: Rig.HoldLeg) {
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.select(index: 3)
+        rig.run(for: 10)
+        let ember = controller.level
+
+        rig.pause(on: leg, by: { rig.backlight.lidClosed = $0 }, controller: controller)
+        #expect(controller.pause == .lidClosed)
+        rig.run(for: 0.1)
+        #expect(rig.backlight.pwm == 0)
+        rig.run(for: 5)
+        #expect(controller.level == ember)
+        #expect(controller.pause == .lidClosed)
+
+        rig.backlight.lidClosed = false
+        rig.run(for: 15)
+        #expect(controller.pause == nil)
+        #expect(controller.level == ember)
+        #expect(rig.backlight.pwm == emberPWM(controller, 3))
+    }
+
+    @Test(arguments: [Rig.HoldLeg.down, .up])
+    func inactivityFadesAnEmberOutGentlyWhicheverWayTheHoldIsFading(leg: Rig.HoldLeg) {
+        let rig = Rig()
+        rig.backlight.idleDimSeconds = 30
+        let controller = rig.launch()
+        controller.select(index: 3)
+        rig.run(for: 10)
+        let ember = controller.level
+
+        rig.pause(on: leg, by: { rig.secondsIdle = $0 ? 31 : 0 }, controller: controller)
+        #expect(controller.pause == .inactive)
+        rig.run(for: 0.5)
+        #expect(rig.backlight.pwm > 0, "a gentle fade, not an instant cut")
+        rig.run(for: HoldEngine.Tuning().approachDuration)
+        #expect(rig.backlight.pwm == 0)
+        #expect(controller.level == ember)
+        #expect(controller.pause == .inactive)
+
+        rig.secondsIdle = 0
+        rig.run(for: 15)
+        #expect(controller.pause == nil)
+        #expect(controller.level == ember)
+        #expect(rig.backlight.pwm == emberPWM(controller, 3))
+    }
+
+    @Test(arguments: [Rig.HoldLeg.down, .up])
+    func sleepTurnsAnEmberOffAtOnceWhicheverWayTheHoldIsFading(leg: Rig.HoldLeg) {
+        let rig = Rig()
+        let controller = rig.launch()
+        controller.select(index: 3)
+        rig.run(for: 10)
+        let ember = controller.level
+        while rig.holdLeg != leg { rig.run(for: 0.001) }
+
+        controller.willSleep()
+        rig.run(for: 0.1)
+        #expect(rig.backlight.pwm == 0)
+        #expect(controller.level == ember)
+        #expect(controller.pause == .sleeping)
+
+        controller.didWake()
+        rig.run(for: 15)
+        #expect(controller.pause == nil)
+        #expect(controller.level == ember)
         #expect(rig.backlight.pwm == emberPWM(controller, 3))
     }
 

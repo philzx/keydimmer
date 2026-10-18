@@ -138,19 +138,31 @@ public final class HoldEngine {
         fade = nil
     }
 
+    /// Stops holding and turns the light off at `fadeSpeed`, even if the hold was already fading
+    /// down towards 0 at its own, much slower, speed.
+    public func fadeOut(fadeSpeed: Int32) {
+        stop()
+        // Bounce at the hold's own slow speed: overridden at once, it barely moves the light,
+        // where an instant bounce up to the floor could flash before the light goes dark.
+        send(0, speed: fadeSpeed, bounceSpeed: lastSpeed ?? fadeSpeed)
+    }
+
     // MARK: - Commands
 
-    private func command(_ direction: Direction, speed: Int32, from startX: Double, at time: TimeInterval) {
-        let goal: Float = direction == .down ? 0 : tuning.floorGoal
+    /// Commands a fade to `goal`. Same goal as the fade in flight is ignored by CoreBrightness, so
+    /// a new speed first bounces off the opposite goal (at `bounceSpeed`, by default the new one).
+    private func send(_ goal: Float, speed: Int32, bounceSpeed: Int32? = nil) {
         if goal == lastGoal, speed != lastSpeed {
-            // Same goal as the fade in flight is ignored by CoreBrightness; bounce off the
-            // opposite goal first so the new speed takes effect.
             let bounce: Float = goal == 0 ? tuning.floorGoal : 0
-            hardware.setBrightness(bounce, fadeSpeed: speed, commit: false)
+            hardware.setBrightness(bounce, fadeSpeed: bounceSpeed ?? speed, commit: false)
         }
         hardware.setBrightness(goal, fadeSpeed: speed, commit: false)
         lastGoal = goal
         lastSpeed = speed
+    }
+
+    private func command(_ direction: Direction, speed: Int32, from startX: Double, at time: TimeInterval) {
+        send(direction == .down ? 0 : tuning.floorGoal, speed: speed)
         let duration = speed == tuning.holdFadeSpeed ? tuning.holdDuration : tuning.approachDuration
         fade = Fade(
             direction: direction,
