@@ -8,10 +8,7 @@ enum StatusIcon {
         let fill: CGFloat = {
             switch level {
             case .off: return 0
-            case let .ember(index, _):
-                return 0.08 + 0.32 * CGFloat(index) / CGFloat(max(ladder.emberCount, 1))
-            case let .shade(index, _):
-                return 0.08 + 0.32 * CGFloat(index) / CGFloat(max(ladder.shadeCount, 1))
+            case .ember, .shade: return 0.08 + 0.32 * CGFloat(ladder.belowFloorFraction(of: level) ?? 0)
             case let .system(step): return 0.4 + 0.6 * CGFloat(step) / CGFloat(Ladder.systemSteps)
             }
         }()

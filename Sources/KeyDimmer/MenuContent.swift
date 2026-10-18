@@ -368,12 +368,10 @@ struct LadderSlider: View {
         switch level {
         case .off:
             return .clear
-        case let .ember(i, _):
-            let t = Double(i) / Double(max(ladder.emberCount, 1))
-            return active ? Brand.ember.opacity(0.35 + 0.65 * t) : Brand.ember.opacity(0.12 + 0.1 * t)
-        case let .shade(i, _):
-            let t = Double(i) / Double(max(ladder.shadeCount, 1))
-            return active ? Brand.shade.opacity(0.35 + 0.65 * t) : Brand.shade.opacity(0.12 + 0.1 * t)
+        case .ember, .shade:
+            let brand = level.isEmber ? Brand.ember : Brand.shade
+            let t = ladder.belowFloorFraction(of: level) ?? 0
+            return active ? brand.opacity(0.35 + 0.65 * t) : brand.opacity(0.12 + 0.1 * t)
         case let .system(step):
             let t = Double(step) / Double(Ladder.systemSteps)
             return active ? Color.accentColor.opacity(0.45 + 0.55 * t) : Color.secondary.opacity(0.18)
