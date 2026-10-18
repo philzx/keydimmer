@@ -55,15 +55,21 @@ final class Rig {
 
     var holdLeg: HoldLeg { backlight.brightness() == 0 ? .down : .up }
 
-    /// Runs in small steps, keeping `condition` true only while the hold is on `leg`, until the
-    /// controller pauses (or a minute passes), so the pause starts on that leg whenever the lid or
-    /// inactivity is polled.
-    func pause(on leg: HoldLeg, by condition: (Bool) -> Void, controller: LightController) {
+    /// Runs in 1 ms steps, calling `each` before every step, until `done` (or a minute passes).
+    func step(until done: () -> Bool, each: () -> Void = {}) {
         let deadline = clock.now + 60
-        while controller.pause == nil, clock.now < deadline {
-            condition(holdLeg == leg)
+        while !done(), clock.now < deadline {
+            each()
             run(for: 0.001)
         }
+    }
+
+    func runUntilHold(on leg: HoldLeg) { step(until: { holdLeg == leg }) }
+
+    /// Keeps `trigger` set only while the hold is on `leg`, until the controller pauses, so the
+    /// pause starts on that leg whenever the lid or inactivity is polled.
+    func pause(on leg: HoldLeg, by trigger: (Bool) -> Void, controller: LightController) {
+        step(until: { controller.pause != nil }, each: { trigger(holdLeg == leg) })
     }
 }
 
@@ -320,7 +326,7 @@ struct LightControllerTests {
         controller.select(index: 3)
         rig.run(for: 10)
         let ember = controller.level
-        while rig.holdLeg != leg { rig.run(for: 0.001) }
+        rig.runUntilHold(on: leg)
 
         controller.willSleep()
         rig.run(for: 0.1)

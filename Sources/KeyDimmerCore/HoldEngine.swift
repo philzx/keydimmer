@@ -150,11 +150,11 @@ public final class HoldEngine {
     // MARK: - Commands
 
     /// Commands a fade to `goal`. Same goal as the fade in flight is ignored by CoreBrightness, so
-    /// a new speed first bounces off the opposite goal (at `bounceSpeed`, by default the new one).
-    private func send(_ goal: Float, speed: Int32, bounceSpeed: Int32? = nil) {
+    /// a new speed first bounces off the opposite goal, at `bounceSpeed`.
+    private func send(_ goal: Float, speed: Int32, bounceSpeed: Int32) {
         if goal == lastGoal, speed != lastSpeed {
             let bounce: Float = goal == 0 ? tuning.floorGoal : 0
-            hardware.setBrightness(bounce, fadeSpeed: bounceSpeed ?? speed, commit: false)
+            hardware.setBrightness(bounce, fadeSpeed: bounceSpeed, commit: false)
         }
         hardware.setBrightness(goal, fadeSpeed: speed, commit: false)
         lastGoal = goal
@@ -162,7 +162,7 @@ public final class HoldEngine {
     }
 
     private func command(_ direction: Direction, speed: Int32, from startX: Double, at time: TimeInterval) {
-        send(direction == .down ? 0 : tuning.floorGoal, speed: speed)
+        send(direction == .down ? 0 : tuning.floorGoal, speed: speed, bounceSpeed: speed)
         let duration = speed == tuning.holdFadeSpeed ? tuning.holdDuration : tuning.approachDuration
         fade = Fade(
             direction: direction,

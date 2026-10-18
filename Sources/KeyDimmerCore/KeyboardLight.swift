@@ -246,7 +246,7 @@ final class KeyboardLight {
         trace("pause \(reason)")
         pause = reason
         // A gentle fade out, like macOS does for inactivity.
-        let fadeSpeed: Int32 = reason == .inactive ? 2_000 : 0
+        let fadeSpeed: Int32 = reason == .inactive ? tuning.approachFadeSpeed : 0
         if let engine {
             engine.fadeOut(fadeSpeed: fadeSpeed)
         } else {
