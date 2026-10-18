@@ -49,7 +49,9 @@ public protocol DisplayHardware: AnyObject {
     /// display — from the brightness keys, Control Center, another app, or possibly our own sets.
     func observeBrightness(_ handler: @escaping (Float) -> Void)
 
-    /// The backlight's measured luminance in nits, for diagnostics; nil if unavailable.
+    /// The backlight's measured luminance in nits, for diagnostics; 0 while the backlight is off
+    /// (brightness 0, or the display asleep even though brightness still reads its last value);
+    /// nil if unavailable.
     func measuredNits() -> Double?
 }
 
@@ -205,7 +207,9 @@ public final class BuiltInDisplay: DisplayHardware {
     // MARK: Measured luminance
 
     /// `IOMFBBrightnessLevel` on the built-in framebuffer shim (under `disp0`), in nits as 16.16
-    /// fixed point. It tracks the panel live, unlike the backlight's static display parameters.
+    /// fixed point. It tracks the panel live, unlike the backlight's static display parameters
+    /// (`BrightnessMilliNits` holds one value at every brightness, and `CurrentNits` stays 0).
+    /// It settles a few seconds after a brightness change, and reads 0 whenever the backlight is off.
     public func measuredNits() -> Double? {
         var iterator: io_iterator_t = 0
         guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOMobileFramebufferShim"), &iterator)
